@@ -5,27 +5,6 @@
 **Assignee:** Akawatmor  
 **Milestone:** Phase 1 - Week 1
 
-## Description
-Study all Terraform files in `Jenkins-Server-TF/` directory.
-
-## Files to Analyze
-- `ec2.tf` — EC2 instance (t2.2xlarge, 30GB EBS)
-- `vpc.tf` — VPC 10.0.0.0/16, subnet, IGW, route table
-- `iam-role.tf` — IAM Role creation
-- `iam-policy.tf` — AdministratorAccess attachment
-- `iam-instance-profile.tf` — Instance Profile
-- `provider.tf` — AWS provider config
-- `variables.tf` / `variables.tfvars` — Variable definitions
-- `backend.tf` — S3 remote state
-- `gather.tf` — Data sources (AMI lookup)
-- `tools-install.sh` — User data script
-
-## Acceptance Criteria
-- [ ] Document each .tf file purpose and resources created
-- [ ] Document Security Group rules (ports 22, 80, 8080, 9000, 9090)
-- [ ] Document all tools installed via tools-install.sh
-- [ ] Document variables and their default values
-
 ## Terraform Files Analysis
 
 ### 1. provider.tf
