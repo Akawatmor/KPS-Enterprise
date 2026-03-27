@@ -5,20 +5,6 @@
 **Assignee:** Akawatmor  
 **Milestone:** Phase 1 - Week 1
 
-## Description
-Study both Jenkinsfiles to understand every pipeline stage.
-
-## Files to Analyze
-- `Jenkins-Pipeline-Code/Jenkinsfile-Backend`
-- `Jenkins-Pipeline-Code/Jenkinsfile-Frontend`
-
-## Acceptance Criteria
-- [ ] Document all 10 pipeline stages with purpose
-- [ ] Document all required Jenkins credentials (GITHUB, sonar-token, ACCOUNT_ID, ECR_REPO1, ECR_REPO2)
-- [ ] Document all required Jenkins tools (jdk, nodejs, sonar-scanner, DP-Check)
-- [ ] Document security scan stages (SonarQube, OWASP, Trivy FS, Trivy Image)
-- [ ] Document GitOps trigger mechanism (K8s YAML update)
-
 ## Pipeline Stages Overview
 
 Both Backend and Frontend pipelines follow similar DevSecOps patterns with approximately 10 stages:
