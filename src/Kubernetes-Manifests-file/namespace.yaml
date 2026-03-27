@@ -1,0 +1,9 @@
+# Kubernetes Namespace for KPS-Enterprise
+# Create this first before deploying other resources
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: three-tier
+  labels:
+    name: three-tier
+    project: kps-enterprise
