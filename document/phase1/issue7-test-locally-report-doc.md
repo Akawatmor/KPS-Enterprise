@@ -140,9 +140,13 @@ These changes were applied only to the Docker test copy so the local stack could
 
 Please place the screenshots in the following spots when you capture them:
 
-- Frontend browser view: `document/phase1/screenshots/issue7/frontend-home.png`
-- Docker compose status: `document/phase1/screenshots/issue7/docker-compose-ps.png`
-- Backend log output: `document/phase1/screenshots/issue7/backend-logs.png`
+- Frontend browser view:
+![](../../media/phase1/backend-health.png)
+
+- Docker compose status: `document/phase1/screenshots/issue7/
+![](../../media/phase1/docker-compose.png)
+- Backend log output: 
+![](../../media/phase1/backend-log.png)
 
 ## Summary
 
