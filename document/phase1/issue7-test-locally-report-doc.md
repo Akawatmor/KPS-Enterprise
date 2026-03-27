@@ -143,7 +143,7 @@ Please place the screenshots in the following spots when you capture them:
 - Frontend browser view:
 ![](../../media/phase1/backend-health.png)
 
-- Docker compose status: `document/phase1/screenshots/issue7/
+- Docker compose status: `document/phase1/screenshots/issue7/`
 ![](../../media/phase1/docker-compose.png)
 - Backend log output: 
 ![](../../media/phase1/backend-log.png)
