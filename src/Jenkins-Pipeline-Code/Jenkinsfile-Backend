@@ -1,0 +1,144 @@
+// Jenkins Pipeline for Backend - KPS-Enterprise
+// Modified for AWS Learner Lab:
+// - Git URL changed to Akawatmor/KPS-Enterprise
+// - Added Docker Hub push option (ECR is read-only in Learner Lab)
+// - Source code path changed to src/Application-Code/backend
+
+pipeline {
+    agent any 
+    tools {
+        jdk 'jdk'
+        nodejs 'nodejs'
+    }
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+        AWS_ACCOUNT_ID = credentials('ACCOUNT_ID')
+        AWS_ECR_REPO_NAME = credentials('ECR_REPO_BACKEND')  // Renamed for clarity
+        AWS_DEFAULT_REGION = 'us-east-1'
+        REPOSITORY_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/"
+        
+        // Docker Hub credentials (for Learner Lab - ECR is read-only)
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')
+        DOCKERHUB_REPO = 'kps-backend'
+        
+        // Git configuration
+        GIT_REPO_NAME = "KPS-Enterprise"
+        GIT_USER_NAME = "Akawatmor"
+        GIT_USER_EMAIL = "your-email@example.com"  // CHANGE THIS
+    }
+    stages {
+        stage('Cleaning Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+        stage('Checkout from Git') {
+            steps {
+                git credentialsId: 'GITHUB', url: 'https://github.com/Akawatmor/KPS-Enterprise.git', branch: 'develop'
+            }
+        }
+        stage('Sonarqube Analysis') {
+            steps {
+                dir('src/Application-Code/backend') {
+                    withSonarQubeEnv('sonar-server') {
+                        sh ''' $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=kps-backend \
+                        -Dsonar.projectKey=kps-backend '''
+                    }
+                }
+            }
+        }
+        stage('Quality Check') {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token' 
+                }
+            }
+        }
+        stage('OWASP Dependency-Check Scan') {
+            steps {
+                dir('src/Application-Code/backend') {
+                    dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
+                    dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+                }
+            }
+        }
+        stage('Trivy File Scan') {
+            steps {
+                dir('src/Application-Code/backend') {
+                    sh 'trivy fs . > trivyfs.txt'
+                }
+            }
+        }
+        stage("Docker Image Build") {
+            steps {
+                script {
+                    dir('src/Application-Code/backend') {
+                        sh 'docker system prune -f'
+                        sh 'docker container prune -f'
+                        sh "docker build -t ${DOCKERHUB_CREDENTIALS_USR}/${DOCKERHUB_REPO}:${BUILD_NUMBER} ."
+                    }
+                }
+            }
+        }
+        // OPTION 1: Docker Hub Push (Recommended for Learner Lab)
+        stage("Docker Hub Image Push") {
+            steps {
+                script {
+                    sh "echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin"
+                    sh "docker push ${DOCKERHUB_CREDENTIALS_USR}/${DOCKERHUB_REPO}:${BUILD_NUMBER}"
+                }
+            }
+        }
+        // OPTION 2: ECR Push (Only works with write access - not in Learner Lab)
+        // Uncomment this stage and comment out Docker Hub stage if you have ECR write access
+        /*
+        stage("ECR Image Pushing") {
+            steps {
+                script {
+                    sh 'aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${REPOSITORY_URI}'
+                    sh "docker tag ${DOCKERHUB_CREDENTIALS_USR}/${DOCKERHUB_REPO}:${BUILD_NUMBER} ${REPOSITORY_URI}${AWS_ECR_REPO_NAME}:${BUILD_NUMBER}"
+                    sh "docker push ${REPOSITORY_URI}${AWS_ECR_REPO_NAME}:${BUILD_NUMBER}"
+                }
+            }
+        }
+        */
+        stage("TRIVY Image Scan") {
+            steps {
+                sh "trivy image ${DOCKERHUB_CREDENTIALS_USR}/${DOCKERHUB_REPO}:${BUILD_NUMBER} > trivyimage.txt"
+            }
+        }
+        stage('Update Deployment file') {
+            steps {
+                dir('src/Kubernetes-Manifests-file/Backend') {
+                    withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
+                        sh '''
+                            git config user.email "${GIT_USER_EMAIL}"
+                            git config user.name "${GIT_USER_NAME}"
+                            
+                            # Update image tag in deployment.yaml
+                            # For Docker Hub: username/repo:tag format
+                            sed -i "s|image: .*kps-backend:.*|image: ${DOCKERHUB_CREDENTIALS_USR}/${DOCKERHUB_REPO}:${BUILD_NUMBER}|g" deployment.yaml
+                            
+                            git add deployment.yaml
+                            git commit -m "Update backend deployment image to version ${BUILD_NUMBER}" || echo "No changes to commit"
+                            git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME} HEAD:develop || echo "Push failed or no changes"
+                        '''
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            // Archive scan reports
+            archiveArtifacts artifacts: '**/trivyfs.txt, **/trivyimage.txt, **/dependency-check-report.*', allowEmptyArchive: true
+        }
+        success {
+            echo 'Backend Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Backend Pipeline failed!'
+        }
+    }
+}

@@ -1,0 +1,69 @@
+# Docker Compose for KPS-Enterprise - Local Development
+# Uses the modified source code from src/Application-Code/
+#
+# Usage:
+#   cd docker
+#   docker compose -f docker-compose.src.yml up -d --build
+#
+# Or from project root:
+#   docker compose -f docker/docker-compose.src.yml up -d --build
+
+services:
+  mongodb:
+    image: mongo:4.4.6
+    container_name: kps-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongo", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks:
+      - kps-network
+
+  backend:
+    build:
+      context: ../src/Application-Code/backend
+      dockerfile: Dockerfile
+    container_name: kps-backend
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      MONGO_CONN_STR: mongodb://mongodb:27017/taskdb
+      USE_DB_AUTH: "false"
+      PORT: 3500
+    ports:
+      - "3500:3500"
+    restart: unless-stopped
+    networks:
+      - kps-network
+
+  frontend:
+    build:
+      context: ../src/Application-Code/frontend
+      dockerfile: Dockerfile
+    container_name: kps-frontend
+    depends_on:
+      - backend
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      REACT_APP_BACKEND_URL: http://localhost:3500/api/tasks
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    networks:
+      - kps-network
+
+volumes:
+  mongodb-data:
+
+networks:
+  kps-network:
+    driver: bridge
