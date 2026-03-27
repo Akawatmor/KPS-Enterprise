@@ -5,28 +5,6 @@
 **Assignee:** Akawatmor  
 **Milestone:** Phase 1 - Week 1
 
-## Description
-Study all Kubernetes manifest files in `Kubernetes-Manifests-file/`.
-
-## Files to Analyze
-- `Backend/deployment.yaml` — 2 replicas, port 3500, probes config
-- `Backend/service.yaml` — ClusterIP
-- `Frontend/deployment.yaml` — 1 replica, port 3000
-- `Frontend/service.yaml` — ClusterIP
-- `Database/deployment.yaml` — mongo:4.4.6, port 27017
-- `Database/service.yaml` — mongodb-svc
-- `Database/secrets.yaml` — base64 encoded credentials
-- `Database/pv.yaml` — 1Gi PersistentVolume
-- `Database/pvc.yaml` — PersistentVolumeClaim
-- `ingress.yaml` — ALB Ingress with path routing
-
-## Acceptance Criteria
-- [ ] Document each manifest's configuration
-- [ ] Document Liveness/Readiness/Startup probe settings
-- [ ] Document RollingUpdate strategy settings
-- [ ] Document Ingress routing rules (/ → frontend, /api → backend)
-- [ ] Document ALB annotations
-
 ## Backend Manifests
 
 ### Backend Deployment (deployment.yaml)
