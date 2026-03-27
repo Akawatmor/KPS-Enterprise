@@ -5,27 +5,6 @@
 **Assignee:** Akawatmor  
 **Milestone:** Phase 1 - Week 1
 
-## Description
-Review the tools-install.sh user data script and verify all tools are compatible with Learner Lab.
-
-## Tools to Verify
-- Java OpenJDK 17
-- Jenkins (latest)
-- Docker (latest)
-- SonarQube LTS (Docker container)
-- AWS CLI v2
-- kubectl v1.28.4
-- eksctl (latest)
-- Terraform (latest)
-- Trivy (latest)
-- Helm (snap)
-
-## Acceptance Criteria
-- [ ] Verify each tool installs correctly on Amazon Linux 2 / Ubuntu
-- [ ] Document any version conflicts or deprecations
-- [ ] Document estimated disk space usage (must fit in 30GB EBS)
-- [ ] Document estimated memory usage (must fit in instance type)
-
 ## Tool Installation Analysis
 
 ### 1. Java OpenJDK 17
