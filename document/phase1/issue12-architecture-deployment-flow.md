@@ -5,15 +5,6 @@
 **Assignee:** Akawatmor  
 **Milestone:** Phase 1 - Week 1
 
-## Description
-Create a comprehensive architecture diagram and deployment flow document.
-
-## Acceptance Criteria
-- [ ] Create overall architecture diagram (Developer → Git → Jenkins → ECR → EKS → ALB)
-- [ ] Create AWS infrastructure diagram (VPC, EC2, EKS, ECR, ALB)
-- [ ] Create Kubernetes cluster diagram (namespace, pods, services, ingress)
-- [x] Document DevSecOps pipeline flow with security scan positions
-- [ ] Identify potential improvements for Phase 2
 
 ## Overall Architecture Overview
 
