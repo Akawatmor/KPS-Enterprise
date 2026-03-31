@@ -39,7 +39,7 @@ echo ""
 # ----------------------------------------
 CLUSTER_NAME="kps-three-tier-cluster"
 REGION="us-east-1"
-K8S_VERSION="1.28"
+K8S_VERSION="1.30"
 NODE_TYPE="t3.large"
 NODE_COUNT=3
 NODE_MIN=2
@@ -78,22 +78,27 @@ log_success "AWS Account: ${AWS_ACCOUNT_ID}"
 # ----------------------------------------
 log_info "Checking for Learner Lab IAM roles..."
 
-# Check for LabEksClusterRole
-LAB_EKS_ROLE_ARN=$(aws iam get-role --role-name LabEksClusterRole --query 'Role.Arn' --output text 2>/dev/null || echo "")
+# Check for LabEksClusterRole (may have random suffix in Learner Lab)
+LAB_EKS_ROLE_ARN=$(aws iam list-roles --query "Roles[?contains(RoleName, 'LabEksClusterRole')].Arn | [0]" --output text 2>/dev/null || echo "")
 if [ -z "$LAB_EKS_ROLE_ARN" ] || [ "$LAB_EKS_ROLE_ARN" = "None" ]; then
-    log_warn "LabEksClusterRole not found. Using default EKS role creation."
+    log_warn "LabEksClusterRole not found. Trying to create cluster without specifying role..."
     LAB_EKS_ROLE_ARN=""
 else
     log_success "Found LabEksClusterRole: ${LAB_EKS_ROLE_ARN}"
 fi
 
-# Check for LabRole
-LAB_ROLE_ARN=$(aws iam get-role --role-name LabRole --query 'Role.Arn' --output text 2>/dev/null || echo "")
-if [ -z "$LAB_ROLE_ARN" ] || [ "$LAB_ROLE_ARN" = "None" ]; then
-    log_warn "LabRole not found. Using default node role creation."
-    LAB_ROLE_ARN=""
+# Check for LabEksNodeRole (for node groups)
+LAB_NODE_ROLE_ARN=$(aws iam list-roles --query "Roles[?contains(RoleName, 'LabEksNodeRole')].Arn | [0]" --output text 2>/dev/null || echo "")
+if [ -z "$LAB_NODE_ROLE_ARN" ] || [ "$LAB_NODE_ROLE_ARN" = "None" ]; then
+    # Fallback to LabRole
+    LAB_NODE_ROLE_ARN=$(aws iam get-role --role-name LabRole --query 'Role.Arn' --output text 2>/dev/null || echo "")
+fi
+
+if [ -z "$LAB_NODE_ROLE_ARN" ] || [ "$LAB_NODE_ROLE_ARN" = "None" ]; then
+    log_warn "LabEksNodeRole/LabRole not found. Using default node role creation."
+    LAB_NODE_ROLE_ARN=""
 else
-    log_success "Found LabRole: ${LAB_ROLE_ARN}"
+    log_success "Found Node Role: ${LAB_NODE_ROLE_ARN}"
 fi
 
 # ----------------------------------------
@@ -121,11 +126,11 @@ log_info "Creating EKS cluster configuration..."
 
 CONFIG_FILE="${SCRIPT_DIR}/eks-cluster-config.yaml"
 
-if [ -n "$LAB_EKS_ROLE_ARN" ] && [ -n "$LAB_ROLE_ARN" ]; then
+if [ -n "$LAB_EKS_ROLE_ARN" ] && [ -n "$LAB_NODE_ROLE_ARN" ]; then
     # Learner Lab configuration with pre-existing IAM roles
     cat > "$CONFIG_FILE" << EOF
 # EKS Cluster Configuration for AWS Learner Lab
-# Uses pre-existing LabEksClusterRole and LabRole
+# Uses pre-existing LabEksClusterRole and LabEksNodeRole
 apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
 
@@ -145,7 +150,7 @@ managedNodeGroups:
     maxSize: ${NODE_MAX}
     volumeSize: 30
     iam:
-      instanceRoleARN: ${LAB_ROLE_ARN}
+      instanceRoleARN: ${LAB_NODE_ROLE_ARN}
     labels:
       role: worker
       project: kps-enterprise

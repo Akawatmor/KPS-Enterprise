@@ -854,3 +854,87 @@ If scripts fail, manually delete in this order:
 
 **Document maintained by**: KPS-Enterprise Team  
 **Issues**: https://github.com/Akawatmor/KPS-Enterprise/issues
+
+---
+
+## Deployment Results (Verified)
+
+### Learner Lab Constraints Found During Deployment
+
+During actual deployment, the following Learner Lab constraints were discovered:
+
+1. **OIDC Provider Cannot Be Created**
+   - AWS Learner Lab does not allow creating OIDC identity providers
+   - This affects AWS Load Balancer Controller (cannot use ALB Ingress)
+   - This affects AWS EBS CSI Driver (cannot provision EBS volumes)
+
+2. **Workarounds Applied**:
+   - **LoadBalancer**: Use Classic ELB via `type: LoadBalancer` services instead of ALB Ingress
+   - **Storage**: Use `emptyDir` for MongoDB instead of PersistentVolumeClaim
+   - **ECR**: ECR repositories CAN be created (contrary to initial analysis)
+
+### Successful Deployment Configuration
+
+#### EKS Cluster
+- **Name**: kps-three-tier-cluster
+- **Region**: us-east-1
+- **K8s Version**: 1.30
+- **Nodes**: 3x t3.large (Amazon Linux 2023)
+- **Namespace**: three-tier
+
+#### Container Images (ECR)
+- Backend: `533267353075.dkr.ecr.us-east-1.amazonaws.com/kps-backend:latest`
+- Frontend: `533267353075.dkr.ecr.us-east-1.amazonaws.com/kps-frontend:latest`
+
+#### Services
+| Service | Type | Port | Notes |
+|---------|------|------|-------|
+| mongodb-svc | ClusterIP | 27017 | Internal MongoDB |
+| api | ClusterIP | 3500 | Internal Backend API |
+| frontend | ClusterIP | 3000 | Internal Frontend |
+| api-lb | LoadBalancer | 80 | External API access |
+| frontend-lb | LoadBalancer | 80 | External Frontend access |
+
+#### MongoDB Configuration
+- Uses `emptyDir` storage (data is NOT persistent across pod restarts)
+- Authentication disabled for simplicity
+- For production: consider managed MongoDB (Atlas) or external database
+
+### Access URLs
+```
+Frontend: http://af36b63cfae984318adf8e74c84c1287-678915922.us-east-1.elb.amazonaws.com
+API:      http://ae4dae8809faf41849ac8e6b1e7df5e7-567901827.us-east-1.elb.amazonaws.com/api/tasks
+Jenkins:  http://44.192.88.178:8080
+```
+
+### Key Changes from Original Plan
+
+| Original Plan | Actual Implementation | Reason |
+|---------------|----------------------|--------|
+| K8s 1.28 | K8s 1.30 | 1.28 deprecated |
+| ALB Ingress | Classic ELB | OIDC not available |
+| EBS PVC | emptyDir | EBS CSI requires OIDC |
+| Docker Hub | ECR | ECR works in this Lab |
+| MongoDB with auth | MongoDB no auth | Simpler demo setup |
+
+### Verification Commands
+
+```bash
+# Check all pods
+kubectl get pods -n three-tier
+
+# Check services
+kubectl get svc -n three-tier
+
+# Test API
+curl http://<api-lb>/api/tasks
+
+# Create task
+curl -X POST http://<api-lb>/api/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"task":"My Task"}'
+
+# Check nodes
+kubectl get nodes
+```
+
