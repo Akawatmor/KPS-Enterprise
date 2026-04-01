@@ -1,11 +1,11 @@
 # EC2 Instance for Jenkins Server
 # Modified for AWS Learner Lab constraints:
-# - Instance type: t2.large (max allowed in Learner Lab, was t2.2xlarge)
+# - Instance type: t3.large (max allowed in Learner Lab, was t2.2xlarge)
 # - IAM Instance Profile: LabInstanceProfile (pre-existing in Learner Lab)
 
 resource "aws_instance" "ec2" {
   ami                    = data.aws_ami.ami.image_id
-  instance_type          = "t2.large"  # Changed from t2.2xlarge (Learner Lab limit)
+  instance_type          = "t3.large"  # Changed from t2.2xlarge (Learner Lab limit)
   key_name               = var.key-name
   subnet_id              = aws_subnet.public-subnet.id
   vpc_security_group_ids = [aws_security_group.security-group.id]

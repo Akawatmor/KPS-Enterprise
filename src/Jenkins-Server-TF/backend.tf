@@ -20,7 +20,7 @@ terraform {
   #     --region us-east-1
   
   backend "s3" {
-    bucket         = "kps-terraform-state-CHANGE_TO_YOUR_ACCOUNT_ID"
+    bucket         = "kps-deployment"
     region         = "us-east-1"
     key            = "KPS-Enterprise/Jenkins-Server-TF/terraform.tfstate"
     dynamodb_table = "kps-terraform-lock"

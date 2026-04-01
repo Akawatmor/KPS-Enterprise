@@ -34,7 +34,7 @@ pipeline {
         }
         stage('Checkout from Git') {
             steps {
-                git credentialsId: 'GITHUB', url: 'https://github.com/Akawatmor/KPS-Enterprise.git', branch: 'develop'
+                git credentialsId: 'GITHUB', url: 'https://github.com/Akawatmor/KPS-Enterprise.git', branch: 'phase1-implementation'
             }
         }
         stage('Sonarqube Analysis') {
@@ -122,7 +122,7 @@ pipeline {
                             
                             git add deployment.yaml
                             git commit -m "Update frontend deployment image to version ${BUILD_NUMBER}" || echo "No changes to commit"
-                            git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME} HEAD:develop || echo "Push failed or no changes"
+                            git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME} HEAD:phase1-implementation || echo "Push failed or no changes"
                         '''
                     }
                 }
