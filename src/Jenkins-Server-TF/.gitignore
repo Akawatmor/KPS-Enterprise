@@ -7,6 +7,5 @@
 *.tfvars.json
 *.tfvars.yaml
 *.tfvars.yml
-.terraform.lock.hcl
 *.log
 *.tfplan
