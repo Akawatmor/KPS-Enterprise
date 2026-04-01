@@ -74,3 +74,19 @@ sudo apt install trivy -y
 # Intalling Helm
 #! /bin/bash
 sudo snap install helm --classic
+
+
+#! /bin/bash
+# ไปที่โฟลเดอร์สำหรับติดตั้ง
+cd /opt
+# ดาวน์โหลดเวอร์ชันล่าสุด (แก้เลขเวอร์ชันเป็น 12.2.0 ตามที่คุณต้องการ)
+sudo wget https://github.com/dependency-check/DependencyCheck/releases/download/v12.2.0/dependency-check-12.2.0-release.zip
+# คลายไฟล์
+sudo apt install unzip -y
+sudo unzip dependency-check-12.2.0-release.zip
+# ลบไฟล์ zip ที่ไม่ได้ใช้แล้ว
+sudo rm dependency-check-12.2.0-release.zip
+# เปลี่ยนสิทธิ์ให้ Jenkins สามารถใช้งานได้ (สมมติว่า Jenkins รันด้วย user 'jenkins')
+sudo chown -R jenkins:jenkins /opt/dependency-check
+
+sudo -u jenkins /opt/dependency-check/bin/dependency-check.sh --update --nvdApiKey "ac26f4dc-ddb3-4d85-a296-959d42da64c1"

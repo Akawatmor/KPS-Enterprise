@@ -21,7 +21,7 @@ pipeline {
         // Git configuration
         GIT_REPO_NAME = "KPS-Enterprise"
         GIT_USER_NAME = "Akawatmor"
-        GIT_USER_EMAIL = "your-email@example.com"  // CHANGE THIS
+        GIT_USER_EMAIL = "akawat.mor@dome.tu.ac.th"  // CHANGE THIS
     }
     stages {
         stage('Cleaning Workspace') {

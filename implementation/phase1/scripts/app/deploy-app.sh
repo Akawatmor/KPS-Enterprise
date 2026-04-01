@@ -204,34 +204,58 @@ kubectl rollout status deployment/frontend -n "$NAMESPACE" --timeout=300s
 log_success "Frontend deployed and ready"
 
 # ----------------------------------------
-# Deploy Ingress
+# Deploy Ingress / LoadBalancer
 # ----------------------------------------
 echo ""
-log_info "Step 5: Deploying Ingress (ALB)..."
+log_info "Step 5: Exposing Frontend via LoadBalancer..."
 
-kubectl apply -f "${MANIFESTS_DIR}/ingress.yaml"
-log_info "  - Ingress created"
+# Use LoadBalancer instead of ALB Ingress (Learner Lab doesn't support ALB Controller)
+kubectl patch svc frontend -n "$NAMESPACE" -p '{"spec": {"type": "LoadBalancer"}}' 2>/dev/null || true
 
-# Wait for ALB to be provisioned
-log_info "  Waiting for ALB to be provisioned (this may take 2-5 minutes)..."
-sleep 30
-
-# Get ALB DNS
-ALB_DNS=""
+log_info "  Waiting for LoadBalancer address..."
+FRONTEND_URL=""
 for i in {1..20}; do
-    ALB_DNS=$(kubectl get ingress -n "$NAMESPACE" three-tier-ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-    if [ -n "$ALB_DNS" ]; then
+    FRONTEND_URL=$(kubectl get svc frontend -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+    if [ -n "$FRONTEND_URL" ]; then
         break
     fi
-    log_info "  Waiting for ALB address... ($i/20)"
-    sleep 15
+    echo -n "."
+    sleep 10
 done
+echo ""
 
-if [ -z "$ALB_DNS" ]; then
-    log_warn "ALB DNS not available yet. Check later with:"
-    log_info "  kubectl get ingress -n ${NAMESPACE}"
+if [ -z "$FRONTEND_URL" ]; then
+    log_warn "LoadBalancer address not available yet."
+    log_info "Check later: kubectl get svc frontend -n ${NAMESPACE}"
 else
-    log_success "ALB provisioned: ${ALB_DNS}"
+    log_success "Frontend URL: http://${FRONTEND_URL}:3000"
+fi
+
+# ----------------------------------------
+# Install ArgoCD for GitOps (Optional)
+# ----------------------------------------
+echo ""
+log_info "Step 6: ArgoCD GitOps Setup..."
+
+if kubectl get namespace argocd &> /dev/null; then
+    log_info "  ArgoCD already installed"
+    ARGOCD_URL=$(kubectl get svc argocd-server -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+    if [ -n "$ARGOCD_URL" ]; then
+        log_success "  ArgoCD URL: http://${ARGOCD_URL}"
+    fi
+else
+    read -p "Install ArgoCD for GitOps auto-deployment? (y/n): " INSTALL_ARGOCD
+    if [ "$INSTALL_ARGOCD" == "y" ]; then
+        if [ -f "${SCRIPT_DIR}/install-argocd.sh" ]; then
+            "${SCRIPT_DIR}/install-argocd.sh"
+        else
+            log_warn "ArgoCD install script not found. Run manually:"
+            log_info "  ${SCRIPT_DIR}/install-argocd.sh"
+        fi
+    else
+        log_info "  Skipping ArgoCD installation"
+        log_info "  To install later: ./install-argocd.sh"
+    fi
 fi
 
 # ----------------------------------------
@@ -267,23 +291,20 @@ echo ""
 log_success "Three-tier application deployed to EKS!"
 echo ""
 echo "Resources Deployed:"
-echo "  ✅ MongoDB (1 pod, with PersistentVolume)"
+echo "  ✅ MongoDB (1 pod, emptyDir volume)"
 echo "  ✅ Backend API (2 pods)"
-echo "  ✅ Frontend (2 pods)"
-echo "  ✅ Ingress (ALB)"
+echo "  ✅ Frontend (1 pod)"
+echo "  ✅ LoadBalancer (Classic ELB)"
 echo ""
 
-if [ -n "$ALB_DNS" ]; then
-    echo "Application URLs:"
-    echo "  Frontend:  http://${ALB_DNS}/"
-    echo "  Backend:   http://${ALB_DNS}/api/tasks"
-    echo "  Health:    http://${ALB_DNS}/api/healthz"
+if [ -n "$FRONTEND_URL" ]; then
+    echo "Application URL:"
+    echo "  Frontend:  http://${FRONTEND_URL}:3000"
     echo ""
-    log_warn "Note: ALB may take a few more minutes to become fully operational."
-    log_info "If the URL doesn't work immediately, wait 2-3 minutes and try again."
+    log_warn "Note: ELB may take 1-2 minutes to become fully operational."
 else
-    log_warn "ALB DNS not available yet. Run this command to check:"
-    echo "  kubectl get ingress -n ${NAMESPACE} -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}'"
+    log_warn "Frontend URL not available yet. Run:"
+    echo "  kubectl get svc frontend -n ${NAMESPACE}"
 fi
 
 echo ""
@@ -302,17 +323,13 @@ cat > "${SCRIPT_DIR}/deployment-info.txt" << EOF
 NAMESPACE=${NAMESPACE}
 DOCKERHUB_USER=${DOCKERHUB_USER}
 IMAGE_TAG=${IMAGE_TAG}
-ALB_DNS=${ALB_DNS}
-
-# URLs
-FRONTEND_URL=http://${ALB_DNS}/
-BACKEND_URL=http://${ALB_DNS}/api/tasks
-HEALTH_URL=http://${ALB_DNS}/api/healthz
+FRONTEND_URL=http://${FRONTEND_URL}:3000
 
 # Kubectl commands
 kubectl get pods -n ${NAMESPACE}
 kubectl get svc -n ${NAMESPACE}
-kubectl get ingress -n ${NAMESPACE}
+kubectl get application -n argocd  # ArgoCD status
 EOF
 
 log_success "Deployment info saved to: ${SCRIPT_DIR}/deployment-info.txt"
+log_success "Application deployed!"
