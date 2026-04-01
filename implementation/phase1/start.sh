@@ -151,6 +151,75 @@ check_prerequisites() {
         return 1
     fi
     
+    # ----------------------------------------
+    # Check AWS Resources (Key Pair, S3, DynamoDB)
+    # ----------------------------------------
+    log_step "Checking AWS Resources..."
+    echo ""
+    
+    local AWS_REGION=$(aws configure get region || echo "us-east-1")
+    local KEY_PAIR_NAME="kps-jenkins-key"
+    local S3_BUCKET="kps-terraform-state-${AWS_ACCOUNT_ID}"
+    local DYNAMODB_TABLE="kps-terraform-lock"
+    
+    local RESOURCES_MISSING=0
+    
+    # Check SSH Key Pair
+    if aws ec2 describe-key-pairs --key-names "$KEY_PAIR_NAME" --region "$AWS_REGION" &> /dev/null; then
+        log_success "SSH Key Pair exists: ${KEY_PAIR_NAME}"
+    else
+        log_warn "SSH Key Pair not found: ${KEY_PAIR_NAME}"
+        RESOURCES_MISSING=1
+    fi
+    
+    # Check S3 Bucket
+    if aws s3 ls "s3://${S3_BUCKET}" --region "$AWS_REGION" &> /dev/null; then
+        log_success "S3 Bucket exists: ${S3_BUCKET}"
+    else
+        log_warn "S3 Bucket not found: ${S3_BUCKET}"
+        RESOURCES_MISSING=1
+    fi
+    
+    # Check DynamoDB Table
+    if aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" --region "$AWS_REGION" &> /dev/null; then
+        log_success "DynamoDB Table exists: ${DYNAMODB_TABLE}"
+    else
+        log_warn "DynamoDB Table not found: ${DYNAMODB_TABLE}"
+        RESOURCES_MISSING=1
+    fi
+    
+    echo ""
+    
+    if [ $RESOURCES_MISSING -eq 1 ]; then
+        log_warn "Some AWS resources are missing (SSH Key, S3 Bucket, or DynamoDB Table)."
+        echo ""
+        log_info "These resources are required for:"
+        echo "  - SSH Key Pair: Access to Jenkins EC2 instance"
+        echo "  - S3 Bucket: Terraform state storage"
+        echo "  - DynamoDB Table: Terraform state locking"
+        echo ""
+        read -p "Do you want to create them automatically? (yes/no): " RUN_SETUP
+        
+        if [ "$RUN_SETUP" = "yes" ]; then
+            echo ""
+            chmod +x "${SCRIPT_DIR}/scripts/setup-prerequisites.sh"
+            "${SCRIPT_DIR}/scripts/setup-prerequisites.sh"
+            
+            if [ $? -ne 0 ]; then
+                log_error "Prerequisites setup failed!"
+                return 1
+            fi
+            
+            log_success "AWS resources created successfully!"
+        else
+            log_error "AWS resources are required. Please run: ./scripts/setup-prerequisites.sh"
+            return 1
+        fi
+    else
+        log_success "All AWS resources are ready!"
+    fi
+    
+    echo ""
     return 0
 }
 
@@ -182,8 +251,28 @@ configure_jenkins() {
     "${SCRIPT_DIR}/scripts/jenkins/verify-jenkins.sh"
     
     echo ""
+    echo "=============================================="
     log_warn "Jenkins and SonarQube require MANUAL configuration."
-    log_info "Please follow the setup guide above."
+    echo "=============================================="
+    echo ""
+    log_info "📖 Detailed Setup Guide:"
+    echo "  ${SCRIPT_DIR}../../document/phase1/jenkins-provisioning-guide.md"
+    echo ""
+    log_info "📋 Quick Reference Checklist:"
+    echo "  ${SCRIPT_DIR}../../document/phase1/jenkins-quick-reference.md"
+    echo ""
+    log_info "Estimated Time: 20-30 minutes"
+    echo ""
+    echo "The guides include:"
+    echo "  ✓ Step-by-step Jenkins initial setup"
+    echo "  ✓ Plugin installation (Docker, Kubernetes, SonarQube, etc.)"
+    echo "  ✓ Tool configuration (JDK, NodeJS, SonarQube Scanner)"
+    echo "  ✓ Credentials setup (GitHub, Docker Hub, SonarQube)"
+    echo "  ✓ SonarQube integration"
+    echo "  ✓ Pipeline creation"
+    echo "  ✓ Troubleshooting tips"
+    echo ""
+    echo "=============================================="
     echo ""
     read -p "Press Enter when Jenkins configuration is complete..."
     

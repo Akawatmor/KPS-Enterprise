@@ -113,6 +113,9 @@ log_info "Updating manifests with Docker Hub username..."
 sed -i "s|image: .*kps-backend:.*|image: ${DOCKERHUB_USER}/kps-backend:${IMAGE_TAG}|g" "${MANIFESTS_DIR}/Backend/deployment.yaml"
 sed -i "s|image: DOCKERHUB_USER/kps-backend:.*|image: ${DOCKERHUB_USER}/kps-backend:${IMAGE_TAG}|g" "${MANIFESTS_DIR}/Backend/deployment.yaml"
 
+# Fix MongoDB connection string to include authSource for root user authentication
+sed -i 's|mongodb://mongodb-svc:27017/todo?directConnection=true|mongodb://mongodb-svc:27017/todo?directConnection=true\&authSource=admin|g' "${MANIFESTS_DIR}/Backend/deployment.yaml"
+
 # Update Frontend deployment
 sed -i "s|image: .*kps-frontend:.*|image: ${DOCKERHUB_USER}/kps-frontend:${IMAGE_TAG}|g" "${MANIFESTS_DIR}/Frontend/deployment.yaml"
 sed -i "s|image: DOCKERHUB_USER/kps-frontend:.*|image: ${DOCKERHUB_USER}/kps-frontend:${IMAGE_TAG}|g" "${MANIFESTS_DIR}/Frontend/deployment.yaml"
@@ -136,10 +139,26 @@ log_info "Step 2: Deploying MongoDB..."
 kubectl apply -f "${MANIFESTS_DIR}/Database/secrets.yaml"
 log_info "  - MongoDB secrets created"
 
-kubectl apply -f "${MANIFESTS_DIR}/Database/pvc.yaml"
-log_info "  - MongoDB PVC created"
-
-kubectl apply -f "${MANIFESTS_DIR}/Database/deployment.yaml"
+# Check if EBS CSI Driver is available for dynamic provisioning
+if kubectl get pods -n kube-system -l app=ebs-csi-controller 2>/dev/null | grep -q Running; then
+    log_info "  - EBS CSI Driver found, using PVC..."
+    sed 's/storageClassName: ""/storageClassName: gp2/' "${MANIFESTS_DIR}/Database/pvc.yaml" | kubectl apply -f -
+    log_info "  - MongoDB PVC created"
+    # Remove custom command to allow docker-entrypoint.sh to initialize users
+    cat "${MANIFESTS_DIR}/Database/deployment.yaml" | \
+        sed '/command:/,/0\.0\.0\.0"/d' | \
+        kubectl apply -f -
+else
+    log_warn "  - EBS CSI Driver not found (common in Learner Lab)"
+    log_info "  - Using emptyDir volume for MongoDB (data non-persistent)"
+    # Skip PVC and patch deployment to use emptyDir instead
+    # Also remove custom command to allow docker-entrypoint.sh to initialize users
+    cat "${MANIFESTS_DIR}/Database/deployment.yaml" | \
+        sed 's/persistentVolumeClaim:/emptyDir: {}\'$'\n''          # claimName removed - using emptyDir/' | \
+        sed '/claimName: mongo-volume-claim/d' | \
+        sed '/command:/,/0\.0\.0\.0"/d' | \
+        kubectl apply -f -
+fi
 log_info "  - MongoDB deployment created"
 
 kubectl apply -f "${MANIFESTS_DIR}/Database/service.yaml"

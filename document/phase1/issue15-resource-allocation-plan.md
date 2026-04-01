@@ -490,6 +490,14 @@ terraform {
 ### EKS Cluster Configuration (eksctl or Terraform)
 
 **eksctl config.yaml**:
+
+> 💡 **Note**: The deployment script (`start-eks.sh`) automatically detects and uses the correct IAM roles for your Learner Lab account. You don't need to manually specify ARNs.
+
+The script will look for:
+- `LabEksClusterRole` or similar for the cluster service role
+- `LabEksNodeRole` or fallback to `LabRole` for node instances
+
+**Example generated configuration**:
 ```yaml
 apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
@@ -499,7 +507,7 @@ metadata:
   region: us-east-1
 
 iam:
-  serviceRoleARN: arn:aws:iam::ACCOUNT_ID:role/LabEksClusterRole
+  serviceRoleARN: arn:aws:iam::<YOUR_ACCOUNT_ID>:role/LabEksClusterRole  # Auto-detected
 
 nodeGroups:
   - name: kps-workers
@@ -509,13 +517,21 @@ nodeGroups:
     maxSize: 5                          # ✅ Can scale within limits
     volumeSize: 30                      # ✅ Within 100 GB limit
     iam:
-      instanceRoleARN: arn:aws:iam::ACCOUNT_ID:role/LabRole
+      instanceRoleARN: arn:aws:iam::<YOUR_ACCOUNT_ID>:role/LabRole  # Auto-detected
     labels:
       role: worker
     tags:
       Environment: learner-lab
       Project: kps-enterprise
 ```
+
+**How it works**:
+1. Script runs: `aws iam list-roles` to find roles matching `LabEksClusterRole`
+2. If found, uses that role ARN
+3. For nodes, looks for `LabEksNodeRole`, fallback to `LabRole`
+4. If no roles found, creates cluster without specifying roles (uses eksctl defaults)
+
+This ensures compatibility across **all Learner Lab accounts**, not just one specific account ID.
 
 ---
 

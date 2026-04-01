@@ -2,9 +2,18 @@
 
 ## KPS-Enterprise Three-Tier DevSecOps Application
 
-**Document Version**: 1.0  
+**Document Version**: 1.1  
 **Branch**: `phase1-implementation`  
-**Last Updated**: March 2026
+**Last Updated**: April 2026
+
+---
+
+## 📚 Documentation Index
+
+- **[Prerequisites Setup Guide](../../document/phase1/prerequisites-setup-guide.md)** - Auto-setup AWS resources (SSH Key, S3, DynamoDB)
+- **[Jenkins Provisioning Guide](../../document/phase1/jenkins-provisioning-guide.md)** - Complete step-by-step Jenkins setup (20-30 min)
+- **[Jenkins Quick Reference](../../document/phase1/jenkins-quick-reference.md)** - Quick checklist for Jenkins configuration
+- **This Document** - Overall implementation guide and deployment instructions
 
 ---
 
@@ -256,9 +265,11 @@ trivy --version
 
 ### Issue #19: Configure Jenkins Server
 
-**Estimated Time**: 15-20 minutes (manual configuration)
+**Estimated Time**: 20-30 minutes (manual configuration)
 
-**Steps**:
+> 📖 **Detailed Guide**: See [Jenkins Provisioning Guide](../../document/phase1/jenkins-provisioning-guide.md) for step-by-step instructions with screenshots and troubleshooting.
+
+**Quick Overview**:
 
 1. **Get Initial Admin Password**
    ```bash
@@ -268,75 +279,121 @@ trivy --version
 
 2. **Access Jenkins UI**
    - URL: `http://<EC2_PUBLIC_IP>:8080`
-   - Enter initial admin password
-   - Select "Install suggested plugins"
-   - Create admin user
+   - Complete initial setup wizard
+   - Install suggested plugins + additional plugins
 
-3. **Install Additional Plugins**
-   Navigate to: Manage Jenkins → Plugins → Available plugins
-   
-   Install:
+3. **Install Additional Plugins** (Manage Jenkins → Plugins)
    - Docker, Docker Pipeline
    - Kubernetes CLI, Kubernetes
    - SonarQube Scanner
    - OWASP Dependency-Check
    - NodeJS
 
-4. **Configure Global Tools**
-   Navigate to: Manage Jenkins → Tools
+4. **Configure Global Tools** (Manage Jenkins → Tools)
    
-   | Tool | Name | Version |
-   |------|------|---------|
-   | JDK | jdk | OpenJDK 17 |
-   | NodeJS | nodejs | 18.x |
-   | SonarQube Scanner | sonar-scanner | Latest |
-   | OWASP Dependency-Check | DP-Check | Latest |
+   | Tool | Name | Installation | Notes |
+   |------|------|--------------|-------|
+   | JDK | `jdk` | Manual: `/usr/lib/jvm/java-18-openjdk-amd64` | Uses pre-installed JDK |
+   | NodeJS | `nodejs` | Auto: NodeJS 18.x | Auto-installs on first use |
+   | SonarQube Scanner | `sonar-scanner` | Auto: Latest | Auto-installs on first use |
+   | OWASP Dependency-Check | `DP-Check` | Auto: Latest | Auto-installs on first use |
 
-5. **Add Credentials**
-   Navigate to: Manage Jenkins → Credentials → (global)
+5. **Add Credentials** (Manage Jenkins → Credentials → System → Global)
    
-   | ID | Type | Description |
-   |----|------|-------------|
-   | github-token | Secret text | GitHub Personal Access Token |
-   | GITHUB | Username/Password | GitHub username + PAT |
-   | dockerhub-credentials | Username/Password | Docker Hub username + access token |
-   | sonar-token | Secret text | SonarQube authentication token |
+   | ID | Type | Purpose |
+   |----|------|---------|
+   | `github-token` | Secret text | Git operations |
+   | `GITHUB` | Username/Password | Repository checkout |
+   | `dockerhub-credentials` | Username/Password | Docker image push |
+   | `sonar-token` | Secret text | SonarQube integration |
+
+6. **Configure SonarQube Integration** (Manage Jenkins → System)
+   - SonarQube Server Name: `sonar-server`
+   - Server URL: `http://localhost:9000`
+   - Authentication: `sonar-token`
+
+7. **Create Pipeline Jobs**
+   - **Backend**: Pipeline from SCM → `src/Jenkins-Pipeline-Code/Jenkinsfile-Backend`
+   - **Frontend**: Pipeline from SCM → `src/Jenkins-Pipeline-Code/Jenkinsfile-Frontend`
+
+8. **Configure System Permissions**
+   ```bash
+   # Ensure jenkins can run docker
+   ssh -i ~/.ssh/your-key.pem ubuntu@<EC2_PUBLIC_IP>
+   sudo usermod -aG docker jenkins
+   sudo systemctl restart jenkins
+   
+   # Verify
+   sudo su - jenkins
+   docker ps
+   exit
+   ```
 
 **Verification**:
-- Jenkins UI accessible ✅
-- All plugins installed ✅
-- Tools configured ✅
-- Credentials added ✅
+- ✅ Jenkins UI accessible at `http://<EC2_PUBLIC_IP>:8080`
+- ✅ All required plugins installed (8 plugins)
+- ✅ Global tools configured (JDK, NodeJS, SonarQube Scanner, OWASP)
+- ✅ All 4 credentials added
+- ✅ SonarQube server configured
+- ✅ Both pipeline jobs created
+- ✅ Jenkins can run docker commands
+- ✅ Test run succeeds (or fails at expected stage)
 
 ---
 
 ### Issue #20: Configure SonarQube Server
 
-**Steps**:
+**Estimated Time**: 5-10 minutes
 
-1. **Access SonarQube**
+> 📖 **Detailed Guide**: See [Jenkins Provisioning Guide](../../document/phase1/jenkins-provisioning-guide.md#step-7-configure-sonarqube) for complete instructions.
+
+**Quick Steps**:
+
+1. **Access SonarQube UI**
    - URL: `http://<EC2_PUBLIC_IP>:9000`
    - Default credentials: `admin` / `admin`
-   - Change password immediately
+   - **Change password immediately** on first login
 
 2. **Create Projects**
-   - Administration → Projects → Management
-   - Create Project: `kps-backend`
-   - Create Project: `kps-frontend`
+   - **Backend**: 
+     - Display Name: `kps-backend`
+     - Project Key: `kps-backend`
+     - Main Branch: `main`
+   - **Frontend**:
+     - Display Name: `kps-frontend`
+     - Project Key: `kps-frontend`
+     - Main Branch: `main`
 
-3. **Generate Token**
-   - My Account → Security → Generate Tokens
-   - Name: `jenkins-token`
-   - Copy the token
+3. **Generate Authentication Token**
+   - Navigate: My Account → Security → Generate Tokens
+   - Token Name: `jenkins-integration`
+   - Type: User Token
+   - Expires: 30+ days
+   - **Copy the token** (e.g., `squ_a1b2c3d4...`)
 
-4. **Configure Jenkins Integration**
+4. **Update Jenkins Credential**
+   - Go to Jenkins: Manage Jenkins → Credentials → System → Global
+   - Click `sonar-token` → Update
+   - Replace placeholder with actual SonarQube token
+   - Save
+
+5. **Configure Jenkins Integration**
    - In Jenkins: Manage Jenkins → System → SonarQube servers
-   - Add SonarQube installation:
+   - ✅ Enable injection of SonarQube server configuration
+   - Add SonarQube:
      - Name: `sonar-server`
      - Server URL: `http://localhost:9000`
-     - Server authentication token: `sonar-token` (credential)
+     - Server authentication token: Select `sonar-token`
+   - Save
 
 **Verification**:
+- ✅ SonarQube accessible at port 9000
+- ✅ Admin password changed
+- ✅ Two projects created (backend, frontend)
+- ✅ Authentication token generated
+- ✅ Token updated in Jenkins
+- ✅ SonarQube server configured in Jenkins
+- ✅ Test connection successful
 ```bash
 # Test SonarQube API
 curl http://<EC2_PUBLIC_IP>:9000/api/system/status
@@ -357,9 +414,20 @@ curl http://<EC2_PUBLIC_IP>:9000/api/system/status
 **Configuration**:
 - Cluster Name: `kps-three-tier-cluster`
 - Region: `us-east-1`
-- Kubernetes Version: `1.28`
+- Kubernetes Version: `1.30`
 - Node Group: `3x t3.large`
-- IAM: Uses `LabEksClusterRole` and `LabRole`
+- IAM Roles: **Auto-detected** for your Learner Lab account
+  - Cluster Service Role: `LabEksClusterRole` (auto-detected)
+  - Node Instance Role: `LabEksNodeRole` or `LabRole` (auto-detected)
+
+> 💡 **Multi-Account Compatible**: The script automatically detects and uses the correct IAM role ARNs for **any** Learner Lab account. No manual ARN configuration needed!
+
+**What the script does**:
+1. Detects your AWS account ID
+2. Searches for `LabEksClusterRole` in your account
+3. Searches for `LabEksNodeRole` (fallback to `LabRole`)
+4. Generates eksctl config with correct ARNs
+5. Creates EKS cluster with proper IAM roles
 
 **Verification**:
 ```bash
@@ -371,6 +439,9 @@ kubectl get nodes -o wide
 
 # Check namespaces
 kubectl get namespaces
+
+# Verify IAM roles used
+eksctl get iamidentitymapping --cluster kps-three-tier-cluster --region us-east-1
 ```
 
 ---

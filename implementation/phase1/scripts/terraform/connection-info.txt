@@ -1,5 +1,5 @@
 # KPS-Enterprise Jenkins Server Connection Info
-# Generated: Tue Mar 31 03:21:18 PM UTC 2026
+# Generated: Wed Apr  1 03:56:41 PM UTC 2026
 
 EC2_INSTANCE_ID=[33m╷[0m[0m
 [33m│[0m [0m[1m[33mWarning: [0m[0m[1mNo outputs found[0m
@@ -19,10 +19,10 @@ EC2_PUBLIC_IP=[33m╷[0m[0m
 [33m│[0m [0musing interpolation, please verify the interpolated value is not empty. You
 [33m│[0m [0mcan use the `terraform console` command to assist.
 [33m╵[0m[0m
-SSH_KEY=deployment
+SSH_KEY=kps-jenkins-key
 
 # SSH Connection
-ssh -i ~/.ssh/deployment.pem ubuntu@[33m╷[0m[0m
+ssh -i ~/.ssh/kps-jenkins-key.pem ubuntu@[33m╷[0m[0m
 [33m│[0m [0m[1m[33mWarning: [0m[0m[1mNo outputs found[0m
 [33m│[0m [0m
 [33m│[0m [0m[0mThe state file either has no outputs defined, or all the defined outputs

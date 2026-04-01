@@ -9,6 +9,6 @@ sg-name       = "KPS-Jenkins-sg"
 instance-name = "KPS-Jenkins-server"
 
 # IMPORTANT: Change this to your AWS key pair name before running terraform
-key-name      = "deployment"
+key-name      = "kps-jenkins-key"
 
 # NOTE: iam-role removed - Learner Lab uses pre-created LabInstanceProfile

@@ -203,7 +203,7 @@ stage('Push to Docker Hub') {
 
 #### **eksctl Configuration Example:**
 
-**Before:**
+**Before (Original Project):**
 ```yaml
 apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
@@ -218,7 +218,10 @@ nodeGroups:
     desiredCapacity: 3
 ```
 
-**After:**
+**After (Learner Lab Compatible):**
+
+> 💡 **Note**: Our deployment script (`start-eks.sh`) automatically detects IAM roles for **any** Learner Lab account. Replace `<YOUR_ACCOUNT_ID>` with your actual account ID, or let the script handle it automatically.
+
 ```yaml
 apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
@@ -226,14 +229,26 @@ metadata:
   name: three-tier-cluster
   region: us-east-1                              # ✅ Allowed region
 iam:
-  serviceRoleARN: arn:aws:iam::ACCOUNT_ID:role/LabEksClusterRole  # ✅ Use Learner Lab role
+  # Auto-detected by script - looks for LabEksClusterRole in your account
+  serviceRoleARN: arn:aws:iam::<YOUR_ACCOUNT_ID>:role/LabEksClusterRole  # ✅ Use Learner Lab role
 nodeGroups:
   - name: three-tier-nodes
     instanceType: t2.large                        # ✅ Allowed instance type
     desiredCapacity: 3                            # ✅ Within instance limit (9)
     iam:
-      instanceRoleARN: arn:aws:iam::ACCOUNT_ID:role/LabRole  # ✅ Use Learner Lab role
+      # Auto-detected by script - looks for LabEksNodeRole or LabRole
+      instanceRoleARN: arn:aws:iam::<YOUR_ACCOUNT_ID>:role/LabRole  # ✅ Use Learner Lab role
 ```
+
+**Automatic Role Detection**:
+The `start-eks.sh` script automatically:
+1. Gets your AWS account ID: `aws sts get-caller-identity`
+2. Finds cluster role: `aws iam list-roles --query "Roles[?contains(RoleName, 'LabEksClusterRole')]"`
+3. Finds node role: `aws iam list-roles --query "Roles[?contains(RoleName, 'LabEksNodeRole')]"`
+4. Fallback to `LabRole` if specific EKS node role not found
+5. Generates the config file with correct ARNs for your account
+
+This works for **all Learner Lab accounts**, not just one specific account.
 
 ---
 
