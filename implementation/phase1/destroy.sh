@@ -142,6 +142,8 @@ cleanup() {
     rm -f "${SCRIPT_DIR}/scripts/eks/eks-cluster-config.yaml"
     rm -f "${SCRIPT_DIR}/scripts/app/deployment-info.txt"
     rm -f "${SCRIPT_DIR}/scripts/app/image-info.txt"
+    rm -f "${SCRIPT_DIR}/scripts/app/argocd-info.txt"
+    rm -f "${SCRIPT_DIR}/scripts/prerequisites-info.txt"
     rm -f "${SCRIPT_DIR}/.deployment-state"
     
     log_success "Local files cleaned up"
