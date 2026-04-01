@@ -13,11 +13,8 @@ pipeline {
         nodejs 'nodejs'
     }
     environment {
-        //SCANNER_HOME = tool 'sonar-scanner'
-        AWS_ACCOUNT_ID = credentials('ACCOUNT_ID')
-        AWS_ECR_REPO_NAME = credentials('ECR_REPO_BACKEND')  // Renamed for clarity
+        SCANNER_HOME = tool 'sonar-scanner'
         AWS_DEFAULT_REGION = 'us-east-1'
-        REPOSITORY_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/"
         
         // Docker Hub credentials (for Learner Lab - ECR is read-only)
         DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')
@@ -136,8 +133,12 @@ pipeline {
     }
     post {
         always {
-            // Archive scan reports
-            archiveArtifacts artifacts: '**/trivyfs.txt, **/trivyimage.txt, **/dependency-check-report.*', allowEmptyArchive: true
+            script {
+                // Archive scan reports (wrapped in node context)
+                node {
+                    archiveArtifacts artifacts: '**/trivyfs.txt, **/trivyimage.txt, **/dependency-check-report.*', allowEmptyArchive: true
+                }
+            }
         }
         success {
             echo 'Backend Pipeline completed successfully!'

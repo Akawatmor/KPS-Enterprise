@@ -123,9 +123,9 @@ fi
 # ----------------------------------------
 log_info "Initializing Terraform..."
 if [ -f "backend_override.tf" ]; then
-    terraform init -reconfigure
+    terraform init -reconfigure -backend-config="bucket=kps-terraform-state-${AWS_ACCOUNT_ID}"
 else
-    terraform init
+    terraform init -backend-config="bucket=kps-terraform-state-${AWS_ACCOUNT_ID}"
 fi
 
 if [ $? -ne 0 ]; then

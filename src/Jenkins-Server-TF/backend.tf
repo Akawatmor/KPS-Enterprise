@@ -19,8 +19,10 @@ terraform {
   #     --billing-mode PAY_PER_REQUEST \
   #     --region us-east-1
   
+  # export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
   backend "s3" {
-    bucket         = "kps-deployment"
+    #bucket         = "kps-terraform-state-{$AWS_ACCOUNT_ID}"
     region         = "us-east-1"
     key            = "KPS-Enterprise/Jenkins-Server-TF/terraform.tfstate"
     dynamodb_table = "kps-terraform-lock"

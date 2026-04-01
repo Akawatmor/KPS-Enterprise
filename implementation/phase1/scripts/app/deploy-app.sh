@@ -113,6 +113,9 @@ log_info "Updating manifests with Docker Hub username..."
 sed -i "s|image: .*kps-backend:.*|image: ${DOCKERHUB_USER}/kps-backend:${IMAGE_TAG}|g" "${MANIFESTS_DIR}/Backend/deployment.yaml"
 sed -i "s|image: DOCKERHUB_USER/kps-backend:.*|image: ${DOCKERHUB_USER}/kps-backend:${IMAGE_TAG}|g" "${MANIFESTS_DIR}/Backend/deployment.yaml"
 
+# Fix MongoDB connection string to include authSource for root user authentication
+sed -i 's|mongodb://mongodb-svc:27017/todo?directConnection=true|mongodb://mongodb-svc:27017/todo?directConnection=true\&authSource=admin|g' "${MANIFESTS_DIR}/Backend/deployment.yaml"
+
 # Update Frontend deployment
 sed -i "s|image: .*kps-frontend:.*|image: ${DOCKERHUB_USER}/kps-frontend:${IMAGE_TAG}|g" "${MANIFESTS_DIR}/Frontend/deployment.yaml"
 sed -i "s|image: DOCKERHUB_USER/kps-frontend:.*|image: ${DOCKERHUB_USER}/kps-frontend:${IMAGE_TAG}|g" "${MANIFESTS_DIR}/Frontend/deployment.yaml"
@@ -136,10 +139,26 @@ log_info "Step 2: Deploying MongoDB..."
 kubectl apply -f "${MANIFESTS_DIR}/Database/secrets.yaml"
 log_info "  - MongoDB secrets created"
 
-kubectl apply -f "${MANIFESTS_DIR}/Database/pvc.yaml"
-log_info "  - MongoDB PVC created"
-
-kubectl apply -f "${MANIFESTS_DIR}/Database/deployment.yaml"
+# Check if EBS CSI Driver is available for dynamic provisioning
+if kubectl get pods -n kube-system -l app=ebs-csi-controller 2>/dev/null | grep -q Running; then
+    log_info "  - EBS CSI Driver found, using PVC..."
+    sed 's/storageClassName: ""/storageClassName: gp2/' "${MANIFESTS_DIR}/Database/pvc.yaml" | kubectl apply -f -
+    log_info "  - MongoDB PVC created"
+    # Remove custom command to allow docker-entrypoint.sh to initialize users
+    cat "${MANIFESTS_DIR}/Database/deployment.yaml" | \
+        sed '/command:/,/0\.0\.0\.0"/d' | \
+        kubectl apply -f -
+else
+    log_warn "  - EBS CSI Driver not found (common in Learner Lab)"
+    log_info "  - Using emptyDir volume for MongoDB (data non-persistent)"
+    # Skip PVC and patch deployment to use emptyDir instead
+    # Also remove custom command to allow docker-entrypoint.sh to initialize users
+    cat "${MANIFESTS_DIR}/Database/deployment.yaml" | \
+        sed 's/persistentVolumeClaim:/emptyDir: {}\'$'\n''          # claimName removed - using emptyDir/' | \
+        sed '/claimName: mongo-volume-claim/d' | \
+        sed '/command:/,/0\.0\.0\.0"/d' | \
+        kubectl apply -f -
+fi
 log_info "  - MongoDB deployment created"
 
 kubectl apply -f "${MANIFESTS_DIR}/Database/service.yaml"
@@ -185,34 +204,58 @@ kubectl rollout status deployment/frontend -n "$NAMESPACE" --timeout=300s
 log_success "Frontend deployed and ready"
 
 # ----------------------------------------
-# Deploy Ingress
+# Deploy Ingress / LoadBalancer
 # ----------------------------------------
 echo ""
-log_info "Step 5: Deploying Ingress (ALB)..."
+log_info "Step 5: Exposing Frontend via LoadBalancer..."
 
-kubectl apply -f "${MANIFESTS_DIR}/ingress.yaml"
-log_info "  - Ingress created"
+# Use LoadBalancer instead of ALB Ingress (Learner Lab doesn't support ALB Controller)
+kubectl patch svc frontend -n "$NAMESPACE" -p '{"spec": {"type": "LoadBalancer"}}' 2>/dev/null || true
 
-# Wait for ALB to be provisioned
-log_info "  Waiting for ALB to be provisioned (this may take 2-5 minutes)..."
-sleep 30
-
-# Get ALB DNS
-ALB_DNS=""
+log_info "  Waiting for LoadBalancer address..."
+FRONTEND_URL=""
 for i in {1..20}; do
-    ALB_DNS=$(kubectl get ingress -n "$NAMESPACE" three-tier-ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-    if [ -n "$ALB_DNS" ]; then
+    FRONTEND_URL=$(kubectl get svc frontend -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+    if [ -n "$FRONTEND_URL" ]; then
         break
     fi
-    log_info "  Waiting for ALB address... ($i/20)"
-    sleep 15
+    echo -n "."
+    sleep 10
 done
+echo ""
 
-if [ -z "$ALB_DNS" ]; then
-    log_warn "ALB DNS not available yet. Check later with:"
-    log_info "  kubectl get ingress -n ${NAMESPACE}"
+if [ -z "$FRONTEND_URL" ]; then
+    log_warn "LoadBalancer address not available yet."
+    log_info "Check later: kubectl get svc frontend -n ${NAMESPACE}"
 else
-    log_success "ALB provisioned: ${ALB_DNS}"
+    log_success "Frontend URL: http://${FRONTEND_URL}:3000"
+fi
+
+# ----------------------------------------
+# Install ArgoCD for GitOps (Optional)
+# ----------------------------------------
+echo ""
+log_info "Step 6: ArgoCD GitOps Setup..."
+
+if kubectl get namespace argocd &> /dev/null; then
+    log_info "  ArgoCD already installed"
+    ARGOCD_URL=$(kubectl get svc argocd-server -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+    if [ -n "$ARGOCD_URL" ]; then
+        log_success "  ArgoCD URL: http://${ARGOCD_URL}"
+    fi
+else
+    read -p "Install ArgoCD for GitOps auto-deployment? (y/n): " INSTALL_ARGOCD
+    if [ "$INSTALL_ARGOCD" == "y" ]; then
+        if [ -f "${SCRIPT_DIR}/install-argocd.sh" ]; then
+            "${SCRIPT_DIR}/install-argocd.sh"
+        else
+            log_warn "ArgoCD install script not found. Run manually:"
+            log_info "  ${SCRIPT_DIR}/install-argocd.sh"
+        fi
+    else
+        log_info "  Skipping ArgoCD installation"
+        log_info "  To install later: ./install-argocd.sh"
+    fi
 fi
 
 # ----------------------------------------
@@ -248,23 +291,20 @@ echo ""
 log_success "Three-tier application deployed to EKS!"
 echo ""
 echo "Resources Deployed:"
-echo "  ✅ MongoDB (1 pod, with PersistentVolume)"
+echo "  ✅ MongoDB (1 pod, emptyDir volume)"
 echo "  ✅ Backend API (2 pods)"
-echo "  ✅ Frontend (2 pods)"
-echo "  ✅ Ingress (ALB)"
+echo "  ✅ Frontend (1 pod)"
+echo "  ✅ LoadBalancer (Classic ELB)"
 echo ""
 
-if [ -n "$ALB_DNS" ]; then
-    echo "Application URLs:"
-    echo "  Frontend:  http://${ALB_DNS}/"
-    echo "  Backend:   http://${ALB_DNS}/api/tasks"
-    echo "  Health:    http://${ALB_DNS}/api/healthz"
+if [ -n "$FRONTEND_URL" ]; then
+    echo "Application URL:"
+    echo "  Frontend:  http://${FRONTEND_URL}:3000"
     echo ""
-    log_warn "Note: ALB may take a few more minutes to become fully operational."
-    log_info "If the URL doesn't work immediately, wait 2-3 minutes and try again."
+    log_warn "Note: ELB may take 1-2 minutes to become fully operational."
 else
-    log_warn "ALB DNS not available yet. Run this command to check:"
-    echo "  kubectl get ingress -n ${NAMESPACE} -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}'"
+    log_warn "Frontend URL not available yet. Run:"
+    echo "  kubectl get svc frontend -n ${NAMESPACE}"
 fi
 
 echo ""
@@ -283,17 +323,13 @@ cat > "${SCRIPT_DIR}/deployment-info.txt" << EOF
 NAMESPACE=${NAMESPACE}
 DOCKERHUB_USER=${DOCKERHUB_USER}
 IMAGE_TAG=${IMAGE_TAG}
-ALB_DNS=${ALB_DNS}
-
-# URLs
-FRONTEND_URL=http://${ALB_DNS}/
-BACKEND_URL=http://${ALB_DNS}/api/tasks
-HEALTH_URL=http://${ALB_DNS}/api/healthz
+FRONTEND_URL=http://${FRONTEND_URL}:3000
 
 # Kubectl commands
 kubectl get pods -n ${NAMESPACE}
 kubectl get svc -n ${NAMESPACE}
-kubectl get ingress -n ${NAMESPACE}
+kubectl get application -n argocd  # ArgoCD status
 EOF
 
 log_success "Deployment info saved to: ${SCRIPT_DIR}/deployment-info.txt"
+log_success "Application deployed!"

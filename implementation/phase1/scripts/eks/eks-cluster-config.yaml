@@ -9,7 +9,7 @@ metadata:
   version: "1.30"
 
 iam:
-  serviceRoleARN: arn:aws:iam::533267353075:role/c197601a5059488l14479765t1w533267-LabEksClusterRole-HBkidGfwlUja
+  serviceRoleARN: arn:aws:iam::533267353075:role/c197601a5059488l14479765t1w533267-LabEksClusterRole-y5d5vJ2AOQhX
 
 managedNodeGroups:
   - name: kps-nodegroup
@@ -19,7 +19,7 @@ managedNodeGroups:
     maxSize: 4
     volumeSize: 30
     iam:
-      instanceRoleARN: arn:aws:iam::533267353075:role/c197601a5059488l14479765t1w533267353-LabEksNodeRole-whMjVca0Vrvo
+      instanceRoleARN: arn:aws:iam::533267353075:role/c197601a5059488l14479765t1w533267353-LabEksNodeRole-35zcJQVl9OJZ
     labels:
       role: worker
       project: kps-enterprise
