@@ -13,7 +13,9 @@
 #   - AWS Load Balancer Controller installed
 #   - Docker images pushed to Docker Hub
 #
-# Usage: ./deploy-app.sh [DOCKERHUB_USER]
+# Usage: ./deploy-app.sh DOCKERHUB_USER [IMAGE_TAG]
+#   - DOCKERHUB_USER: Docker Hub username/organization
+#   - IMAGE_TAG: Optional image tag to deploy (default: latest)
 # =============================================================================
 
 set -e
