@@ -4,6 +4,8 @@
 // - Added Docker Hub push option (ECR is read-only in Learner Lab)
 // - Source code path changed to src/Application-Code/backend
 
+//
+
 pipeline {
     agent any 
     tools {
@@ -21,7 +23,7 @@ pipeline {
         // Git configuration
         GIT_REPO_NAME = "KPS-Enterprise"
         GIT_USER_NAME = "Akawatmor"
-        GIT_USER_EMAIL = "your-email@example.com"  // CHANGE THIS
+        GIT_USER_EMAIL = "akawat.mor@dome.tu.ac.th"  // CHANGE THIS
     }
     stages {
         stage('Cleaning Workspace') {
@@ -38,9 +40,12 @@ pipeline {
             steps {
                 dir('src/Application-Code/backend') {
                     withSonarQubeEnv('sonar-server') {
+                        script {
+                        def SCANNER_HOME = tool 'sonar-scanner'
                         sh ''' $SCANNER_HOME/bin/sonar-scanner \
                         -Dsonar.projectName=kps-backend \
                         -Dsonar.projectKey=kps-backend '''
+                        
                     }
                 }
             }
