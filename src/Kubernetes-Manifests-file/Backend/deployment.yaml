@@ -32,7 +32,7 @@ spec:
       - name: api
         # IMPORTANT: Change DOCKERHUB_USER to your Docker Hub username
         # This will be auto-updated by Jenkins pipeline
-        image: akawatmor/kps-backend:2
+        image: akawatmor/kps-backend:3
         imagePullPolicy: Always
         env:
           - name: MONGO_CONN_STR
