@@ -32,7 +32,7 @@ spec:
       - name: frontend
         # IMPORTANT: Change DOCKERHUB_USER to your Docker Hub username
         # This will be auto-updated by Jenkins pipeline
-        image: akawatmor/kps-frontend:8
+        image: akawatmor/kps-frontend:10
         imagePullPolicy: Always
         env:
           # IMPORTANT: Change this to your ALB DNS name or domain
