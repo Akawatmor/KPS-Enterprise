@@ -1,5 +1,5 @@
 # KPS-Enterprise: Three-Tier DevSecOps Project
-## Checkpoint Phase 1 - Detailed Documentation
+## Checkpoint Phase 1 Week 2 - Detailed Documentation
 
 ---
 
@@ -9,10 +9,11 @@
 |--------|-----------|
 | **ชื่อกลุ่ม** | KPS-Enterprise Team |
 | **ชื่อระบบโซลูชัน** | Three-Tier DevSecOps on Kubernetes |
-| **สมาชิกคนที่ 1** | นาย XXXXXX XXXXXX (รหัส: 6XXXXXXXXX) |
-| **สมาชิกคนที่ 2** | นาย XXXXXX XXXXXX (รหัส: 6XXXXXXXXX) |
+| **สมาชิกคนที่ 1** | นายรัฐธรรมนูญ โกศาสังข์ (รหัส: 6609612178) |
+| **สมาชิกคนที่ 2** | นายเอกวัส มรสาเทียน (รหัส: 6609681231) |
 | **Repository** | https://github.com/Akawatmor/KPS-Enterprise |
 | **Branch หลัก** | `develop`, `phase1-implementation` |
+| **Phase Status** | Phase 1 Week 2 - Near Completion |
 
 ---
 

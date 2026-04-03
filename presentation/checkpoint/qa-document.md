@@ -1,5 +1,5 @@
 # ❓ Q&A Document
-## KPS-Enterprise: Potential Questions & Answers
+## KPS-Enterprise: Potential Questions & Answers (Updated)
 
 ---
 
@@ -22,6 +22,11 @@
 | Q13 | ถ้ามี 0 downtime? | Advanced |
 | Q14 | AI ช่วยในส่วนไหน? | Process |
 | Q15 | Next steps / Phase 2? | Planning |
+| **Q16** | **Jenkins Pipeline มีกี่ stage?** | **DevSecOps** |
+| **Q17** | **อธิบาย DevSecOps Pipeline ทั้งหมด?** | **DevSecOps** |
+| **Q18** | **SonarQube ทำงานอย่างไร?** | **Security** |
+| **Q19** | **OWASP vs Trivy ต่างกันอย่างไร?** | **Security** |
+| **Q20** | **ทำอะไรไปบ้างใน Phase 1 Week 2?** | **Summary** |
 
 ---
 
@@ -408,7 +413,7 @@
 ### Implementation Questions (Q9)
 ถามเกี่ยวกับปัญหาที่เจอและวิธีแก้ไข
 
-### Security Questions (Q11, Q12)
+### Security Questions (Q11, Q12, Q18, Q19)
 ถามเกี่ยวกับ security practices
 
 ### Testing Questions (Q10)
@@ -423,8 +428,210 @@
 ### Planning Questions (Q15)
 ถามเกี่ยวกับ next steps
 
+### DevSecOps Questions (Q16, Q17)
+ถามเกี่ยวกับ CI/CD Pipeline และ DevSecOps practices
+
+### Summary Questions (Q20)
+ถามเกี่ยวกับสรุปผลงานที่ทำ
+
 ---
 
-*Q&A Document Version: 1.0*
-*Total Questions: 15*
-*Categories: 9*
+## 🆕 Additional Q&A (Phase 1 Week 2)
+
+### Q16: Jenkins Pipeline มีกี่ Stage อะไรบ้าง?
+
+**Answer:**
+> Jenkins Pipeline ของเรามี **10 Stages** ครับ/ค่ะ:
+>
+> | Stage | ชื่อ | ทำอะไร |
+> |-------|------|--------|
+> | 1 | Git Checkout | Clone repository จาก GitHub |
+> | 2 | Install Dependencies | รัน `npm install` |
+> | 3 | SonarQube Analysis | SAST - Static code analysis |
+> | 4 | Quality Gate | ตรวจว่าผ่าน SonarQube standards |
+> | 5 | OWASP Dependency Check | SCA - Scan npm packages |
+> | 6 | Trivy FS Scan | Scan filesystem vulnerabilities |
+> | 7 | Docker Build | สร้าง container image |
+> | 8 | Trivy Image Scan | Scan Docker image layers |
+> | 9 | Push to Docker Hub | Upload image (ไม่ใช่ ECR) |
+> | 10 | Update K8s Manifest | GitOps - update image tag |
+>
+> **หลักการ Fail-Fast:** ถ้า stage ใดไม่ผ่าน pipeline หยุดทันที ไม่ deploy code ที่มีปัญหา
+
+---
+
+### Q17: อธิบาย DevSecOps Pipeline ทั้งหมดตั้งแต่ต้นจนจบ?
+
+**Answer:**
+> **DevSecOps Pipeline Flow:**
+>
+> ```
+> 1. Developer push code → GitHub
+> 2. GitHub Webhook → trigger Jenkins
+> 3. Jenkins starts pipeline:
+>    └─ Security Scanning (Shift-Left)
+>       ├─ SonarQube (SAST) → code quality, bugs
+>       ├─ OWASP (SCA) → dependencies CVEs
+>       └─ Trivy (Container) → image vulnerabilities
+> 4. If all pass → Build Docker image
+> 5. Push to Docker Hub
+> 6. Update K8s manifest (image tag)
+> 7. Push manifest back to GitHub
+> 8. (Future) ArgoCD detects change → deploy to K8s
+> ```
+>
+> **ข้อดี:**
+> - Security ตั้งแต่ต้น (Shift-Left)
+> - Automated ทุกขั้นตอน
+> - Fail-Fast ถ้าไม่ผ่าน
+> - GitOps ready สำหรับ ArgoCD
+>
+> **Key Adaptations สำหรับ Learner Lab:**
+> - ECR → Docker Hub
+> - IAM roles → LabInstanceProfile
+> - t2.2xlarge → t2.large
+
+---
+
+### Q18: SonarQube ทำงานอย่างไรใน Pipeline?
+
+**Answer:**
+> **SonarQube** ทำหน้าที่ **SAST (Static Application Security Testing)** ครับ/ค่ะ
+>
+> **ขั้นตอนทำงาน:**
+> 1. Jenkins รัน SonarQube Scanner
+> 2. Scanner วิเคราะห์ source code
+> 3. ส่งผลไป SonarQube Server
+> 4. Server ประเมินตาม Quality Gate rules
+> 5. Jenkins รอผล (waitForQualityGate)
+> 6. ถ้าไม่ผ่าน → pipeline fail
+>
+> **สิ่งที่ SonarQube ตรวจ:**
+> | Category | ตัวอย่าง |
+> |----------|---------|
+> | **Bugs** | Null pointer, infinite loops |
+> | **Code Smells** | Duplicate code, long methods |
+> | **Vulnerabilities** | SQL injection patterns |
+> | **Security Hotspots** | Hard-coded credentials |
+> | **Coverage** | Unit test coverage % |
+>
+> **Configuration ใน Jenkinsfile:**
+> ```groovy
+> withSonarQubeEnv('sonar-server') {
+>     sh '''
+>         sonar-scanner \
+>         -Dsonar.projectKey=backend \
+>         -Dsonar.sources=.
+>     '''
+> }
+> ```
+
+---
+
+### Q19: OWASP Dependency Check กับ Trivy ต่างกันอย่างไร?
+
+**Answer:**
+> ทั้งคู่เป็น security scanner แต่ตรวจคนละ layer ครับ/ค่ะ:
+>
+> | Feature | OWASP Dependency Check | Trivy |
+> |---------|------------------------|-------|
+> | **ตรวจอะไร** | npm/maven packages | Container images, FS |
+> | **ประเภท** | SCA (Software Composition) | Container Scanner |
+> | **Database** | NVD (National Vulnerability) | Multiple sources |
+> | **Output** | HTML/XML report | JSON/Table |
+> | **Stage** | หลัง SonarQube | หลัง Docker build |
+>
+> **ทำไมต้องใช้ทั้งคู่?**
+>
+> 1. **OWASP** ตรวจ **dependencies** ใน `package.json`
+>    - เช่น: express@4.17.1 มี CVE-2022-XXXX
+>
+> 2. **Trivy FS** ตรวจ **source code & configs**
+>    - เช่น: hardcoded secrets ใน config files
+>
+> 3. **Trivy Image** ตรวจ **Docker base image**
+>    - เช่น: node:14 มี vulnerabilities ใน OS packages
+>
+> **ครอบคลุมทุก layer ตั้งแต่ code → dependencies → container**
+
+---
+
+### Q20: สรุปสิ่งที่ทำใน Phase 1 Week 2 ทั้งหมด?
+
+**Answer:**
+> **Phase 1 Week 2 Summary:**
+>
+> **📊 งานที่ทำเสร็จ:**
+>
+> | Category | Tasks Completed |
+> |----------|----------------|
+> | **Analysis** | Backend, Frontend, DB, Pipeline, IaC documented |
+> | **Bug Fixes** | 2 critical bugs (db.js boolean, axios semver) |
+> | **Adaptations** | 15+ files modified for Learner Lab |
+> | **Pipeline** | 10-stage DevSecOps pipeline designed |
+> | **Testing** | Local Docker verified (CRUD, health, failure) |
+> | **Documentation** | 15+ documents created |
+>
+> **🔧 Files Modified:**
+> - `src/Application-Code/backend/db.js` - Boolean fix
+> - `src/Application-Code/frontend/package.json` - Semver fix
+> - `src/Jenkins-Server-TF/ec2.tf` - t2.large, LabInstanceProfile
+> - `src/Jenkins-Server-TF/iam-*.tf` - **Deleted**
+> - `src/Jenkins-Pipeline-Code/Jenkinsfile-*` - Docker Hub
+> - `src/Kubernetes-Manifests-file/*` - Docker Hub images
+>
+> **🛡️ DevSecOps Features:**
+> - SonarQube (SAST)
+> - OWASP Dependency Check (SCA)
+> - Trivy FS & Image Scan (Container)
+> - Quality Gate enforcement
+> - Fail-Fast pipeline
+>
+> **📋 Remaining:**
+> - Provision Jenkins on AWS
+> - Create EKS cluster
+> - Full E2E pipeline test
+>
+> **GitHub:** github.com/Akawatmor/KPS-Enterprise
+
+---
+
+## 🎯 Demo Points Cheat Sheet
+
+### สิ่งที่ควร Demo ให้อาจารย์เห็น:
+
+| Demo Point | Command/Action | Expected Result |
+|------------|----------------|-----------------|
+| 1. Start containers | `cd docker && docker compose -f docker-compose.src.yml up -d` | 3 containers running |
+| 2. Health check | `curl localhost:3500/healthz` | "Healthy" |
+| 3. Readiness | `curl localhost:3500/ready` | "Ready" |
+| 4. Create task | `curl -X POST localhost:3500/api/tasks -H "Content-Type: application/json" -d '{"task":"Demo"}'` | Task created |
+| 5. List tasks | `curl localhost:3500/api/tasks` | Array with task |
+| 6. Show Jenkinsfile | Open `src/Jenkins-Pipeline-Code/Jenkinsfile-Backend` | 10 stages visible |
+| 7. Show K8s manifest | Open `src/Kubernetes-Manifests-file/Backend/deployment.yaml` | Docker Hub image |
+| 8. Show Terraform | Open `src/Jenkins-Server-TF/ec2.tf` | LabInstanceProfile |
+| 9. GitHub repo | Browse repo structure | Organized folders |
+
+### Quick Commands:
+```bash
+# Start
+cd docker && docker compose -f docker-compose.src.yml up -d --build
+
+# Test APIs
+curl http://localhost:3500/healthz
+curl http://localhost:3500/ready
+curl http://localhost:3500/api/tasks
+curl -X POST http://localhost:3500/api/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"task":"Phase 1 Demo","completed":false}'
+
+# Stop
+docker compose -f docker-compose.src.yml down
+```
+
+---
+
+*Q&A Document Version: 2.0*
+*Total Questions: 20*
+*Categories: 11*
+*Last Updated: April 1, 2569*
