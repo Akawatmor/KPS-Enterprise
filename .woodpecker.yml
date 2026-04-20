@@ -34,7 +34,6 @@ steps:
 
   backend-build:
     image: plugins/docker
-    privileged: true
     settings:
       repo: akawatmor/kps-backend
       tags:
@@ -80,7 +79,6 @@ steps:
 
   frontend-build:
     image: plugins/docker
-    privileged: true
     settings:
       repo: akawatmor/kps-frontend
       tags:

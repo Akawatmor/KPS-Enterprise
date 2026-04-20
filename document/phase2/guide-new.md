@@ -784,6 +784,8 @@ spec:
           value: "Akawatmor"
         - name: WOODPECKER_LOG_LEVEL
           value: "info"
+        - name: WOODPECKER_PLUGINS_PRIVILEGED
+          value: "plugins/docker"
         volumeMounts:
         - name: data
           mountPath: /var/lib/woodpecker
