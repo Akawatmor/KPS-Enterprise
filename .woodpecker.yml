@@ -1,6 +1,7 @@
+# .woodpecker.yml
 when:
-  - event: [push, pull_request]
-    branch: main
+  branch: main
+  event: [push, pull_request]
 
 steps:
   # ═══════════════════════════════════
@@ -13,44 +14,40 @@ steps:
       - npm install
       - echo "Backend dependencies installed successfully"
     when:
-      - event: [push, pull_request]
-        path:
-          include:
-            - "docker/backend/**"
-            - ".woodpecker.yml"
+      path:
+        include:
+          - "docker/backend/**"
+          - ".woodpecker.yml"
 
   backend-security-scan:
     image: aquasec/trivy:latest
     commands:
+      # ให้มันรันที่ root แล้วชี้ path ไปที่โฟลเดอร์
       - trivy fs --severity HIGH,CRITICAL --exit-code 0 docker/backend/
     when:
-      - event: [push, pull_request]
-        path:
-          include:
-            - "docker/backend/**"
+      path:
+        include:
+          - "docker/backend/**"
 
   backend-build:
     image: plugins/docker
     settings:
       repo: akawatmor/kps-backend
       tags:
+        - ${CI_COMMIT_SHA}
         - latest
-        - "${CI_COMMIT_SHA}"
       dockerfile: docker/backend/Dockerfile
       context: docker/backend
       username:
         from_secret: docker_username
       password:
         from_secret: docker_password
-    depends_on:
-      - backend-test
-      - backend-security-scan
     when:
-      - event: push
-        branch: main
-        path:
-          include:
-            - "docker/backend/**"
+      event: push
+      branch: main
+      path:
+        include:
+          - "docker/backend/**"
 
   # ═══════════════════════════════════
   # Frontend Pipeline
@@ -62,44 +59,39 @@ steps:
       - npm install
       - echo "Frontend dependencies installed successfully"
     when:
-      - event: [push, pull_request]
-        path:
-          include:
-            - "docker/frontend/**"
-            - ".woodpecker.yml"
+      path:
+        include:
+          - "docker/frontend/**"
+          - ".woodpecker.yml"
 
   frontend-security-scan:
     image: aquasec/trivy:latest
     commands:
       - trivy fs --severity HIGH,CRITICAL --exit-code 0 docker/frontend/
     when:
-      - event: [push, pull_request]
-        path:
-          include:
-            - "docker/frontend/**"
+      path:
+        include:
+          - "docker/frontend/**"
 
   frontend-build:
     image: plugins/docker
     settings:
       repo: akawatmor/kps-frontend
       tags:
+        - ${CI_COMMIT_SHA}
         - latest
-        - "${CI_COMMIT_SHA}"
       dockerfile: docker/frontend/Dockerfile
       context: docker/frontend
       username:
         from_secret: docker_username
       password:
         from_secret: docker_password
-    depends_on:
-      - frontend-test
-      - frontend-security-scan
     when:
-      - event: push
-        branch: main
-        path:
-          include:
-            - "docker/frontend/**"
+      event: push
+      branch: main
+      path:
+        include:
+          - "docker/frontend/**"
 
   # ═══════════════════════════════════
   # Deploy to K3s
@@ -110,6 +102,7 @@ steps:
       - mkdir -p ~/.kube
       - echo "$KUBECONFIG_CONTENT" > ~/.kube/config
       - chmod 600 ~/.kube/config
+      # หมายเหตุ: เช็คให้ชัวร์ว่าบน K3s รัน deployment ชื่อ api และ frontend จริงๆ
       - kubectl rollout restart deployment/api -n three-tier
       - kubectl rollout restart deployment/frontend -n three-tier
       - kubectl rollout status deployment/api -n three-tier --timeout=120s
@@ -117,9 +110,6 @@ steps:
     environment:
       KUBECONFIG_CONTENT:
         from_secret: k3s_kubeconfig
-    depends_on:
-      - backend-build
-      - frontend-build
     when:
-      - event: push
-        branch: main
+      event: push
+      branch: main
