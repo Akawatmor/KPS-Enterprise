@@ -185,4 +185,6 @@ This project is for educational purposes as part of the Thammasat University cur
 
 ---
 
-**Note**: This is an adapted version of the original project, modified to work within AWS Learner Lab constraints. See documentation for all changes and adaptations made.
+**Note**: This is an adapted version of the original project, modified to work within AWS Learner Lab constraints. See documentation for all changes and adaptations made. 
+
+## สำคัญ มีการเปลี่ยนแปลงใน Phase 2
