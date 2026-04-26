@@ -29,6 +29,7 @@ steps:
   # or use a shell step (see build-push-core-shell alternative below).
   - name: build-push-core
     image: woodpeckerci/plugin-docker-buildx
+    privileged: true
     settings:
       dockerfile: src/phase2-final/backend/Dockerfile
       context: src/phase2-final/backend
@@ -45,6 +46,7 @@ steps:
   # ── 3. Build & push frontend image to Docker Hub ────────────────────────────
   - name: build-push-web
     image: woodpeckerci/plugin-docker-buildx
+    privileged: true
     settings:
       dockerfile: src/phase2-final/frontend/Dockerfile
       context: src/phase2-final/frontend
