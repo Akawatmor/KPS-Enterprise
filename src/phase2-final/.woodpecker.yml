@@ -1,13 +1,13 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Woodpecker CI/CD Pipeline — TodoApp Big Calendar (Phase 2)
+# Woodpecker CI/CD Pipeline — TodoApp Big Calendar
 # Infrastructure: K3s 3-node (1 master + 2 workers) · Docker Hub · Woodpecker
-#
-# App source: src/phase2-final/
 #
 # Required Woodpecker secrets (set in project Settings → Secrets):
 #   DOCKER_USERNAME   — Docker Hub username
-#   DOCKER_PASSWORD   — Docker Hub access token
+#   DOCKER_PASSWORD   — Docker Hub access token (not plain password)
 #   KUBECONFIG_B64    — base64-encoded kubeconfig pointing at K3s master
+#
+# Pipeline runs on every push to 'main' branch.
 # ─────────────────────────────────────────────────────────────────────────────
 
 when:
@@ -25,11 +25,14 @@ steps:
       - go test ./... -v -count=1
 
   # ── 2. Build & push backend image to Docker Hub ─────────────────────────────
+  # NOTE: Replace YOURDOCKERHUB with your actual Docker Hub username,
+  # or use a shell step (see build-push-core-shell alternative below).
   - name: build-push-core
     image: woodpeckerci/plugin-docker-buildx
     settings:
       dockerfile: src/phase2-final/backend/Dockerfile
       context: src/phase2-final/backend
+      # Replace YOURDOCKERHUB with your Docker Hub username.
       repo: YOURDOCKERHUB/todoapp-core
       tags:
         - "${CI_COMMIT_SHA:0:7}"
@@ -45,6 +48,7 @@ steps:
     settings:
       dockerfile: src/phase2-final/frontend/Dockerfile
       context: src/phase2-final/frontend
+      # Replace YOURDOCKERHUB with your Docker Hub username.
       repo: YOURDOCKERHUB/todoapp-web
       tags:
         - "${CI_COMMIT_SHA:0:7}"
@@ -70,7 +74,7 @@ steps:
       # Verify connectivity to K3s master
       - kubectl cluster-info
 
-      # Apply namespace, configmap, PVC, services, ingress (idempotent)
+      # Apply namespace, configmap, PVC (idempotent)
       - kubectl apply -f src/phase2-final/k8s/namespace.yaml
       - kubectl apply -f src/phase2-final/k8s/configmap.yaml
       - kubectl apply -f src/phase2-final/k8s/core-pvc.yaml
@@ -94,9 +98,9 @@ steps:
       - kubectl rollout status deployment/todoapp-core -n todoapp --timeout=180s
       - kubectl rollout status deployment/todoapp-web  -n todoapp --timeout=180s
 
-      # Smoke test — curl health endpoint via in-cluster service
+      # Smoke test — curl the health endpoint via the in-cluster service
       - >
-        kubectl run smoke-${CI_COMMIT_SHA:0:7}
+        kubectl run smoke-test-${CI_COMMIT_SHA:0:7}
         --image=curlimages/curl:8.7.1
         --restart=Never
         --rm
@@ -104,5 +108,5 @@ steps:
         -n todoapp
         -- curl -sf http://todoapp-core:8080/healthz
 
-      # Cleanup
+      # Cleanup kubeconfig
       - rm -f /tmp/kubeconfig

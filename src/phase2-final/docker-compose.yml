@@ -1,0 +1,43 @@
+services:
+  core:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: todoapp-core
+    env_file: .env
+    environment:
+      SERVER_PORT: "8080"
+      DATA_BACKEND: sqlite
+      SQLITE_PATH: /var/lib/todoapp/todoapp.db
+      ALLOWED_ORIGIN: "http://localhost:3000"
+    volumes:
+      - sqlite-data:/var/lib/todoapp
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: todoapp-web
+    environment:
+      # Empty string means the browser will use relative /api paths via proxy.
+      # Set to http://localhost:8080 if no reverse proxy is configured.
+      NEXT_PUBLIC_API_BASE_URL: ""
+    ports:
+      - "3000:3000"
+    depends_on:
+      core:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  sqlite-data:
+    name: todoapp-sqlite-data

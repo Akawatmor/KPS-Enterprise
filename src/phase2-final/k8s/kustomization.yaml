@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: todoapp
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secret.sample.yaml
+  - core-pvc.yaml
+  - core-deployment.yaml
+  - core-service.yaml
+  - web-deployment.yaml
+  - web-service.yaml
+  - ingress.yaml

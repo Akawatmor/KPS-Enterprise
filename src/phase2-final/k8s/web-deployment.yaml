@@ -1,0 +1,63 @@
+# Frontend (Next.js) deployment — Docker Hub image
+# Spread across both worker nodes for availability.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: todoapp-web
+  namespace: todoapp
+  labels:
+    app: todoapp-web
+    app.kubernetes.io/part-of: todoapp
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: todoapp-web
+  template:
+    metadata:
+      labels:
+        app: todoapp-web
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: todoapp-web
+      containers:
+        - name: web
+          image: DOCKER_USERNAME/todoapp-web:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: NEXT_PUBLIC_API_BASE_URL
+              # Requests go through Traefik ingress to the core service.
+              value: ""
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 8
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 600m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1001

@@ -1,0 +1,79 @@
+# Core (Go backend) deployment — Docker Hub image
+# Image tag is updated by Woodpecker CD on every push to main.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: todoapp-core
+  namespace: todoapp
+  labels:
+    app: todoapp-core
+    app.kubernetes.io/part-of: todoapp
+spec:
+  replicas: 1
+  strategy:
+    # Recreate: required because SQLite PVC is ReadWriteOnce.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: todoapp-core
+  template:
+    metadata:
+      labels:
+        app: todoapp-core
+    spec:
+      # K3s: schedule core only on worker nodes (optional affinity)
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 1
+              preference:
+                matchExpressions:
+                  - key: node-role.kubernetes.io/worker
+                    operator: Exists
+      containers:
+        - name: core
+          # Docker Hub image — DOCKER_USERNAME is set as a Woodpecker secret.
+          # Woodpecker will replace the tag on deploy.
+          image: DOCKER_USERNAME/todoapp-core:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: todoapp-config
+            - secretRef:
+                name: todoapp-secret
+          volumeMounts:
+            - name: sqlite-data
+              mountPath: /var/lib/todoapp
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 400m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            runAsUser: 65532
+      volumes:
+        - name: sqlite-data
+          persistentVolumeClaim:
+            claimName: todoapp-sqlite-pvc
