@@ -45,7 +45,8 @@ steps:
       password:
         from_secret: DOCKER_PASSWORD
 
-  # ── 3. Build & push frontend image to Docker Hub ────────────────────────────
+
+  # ── 3. Build & push frontend image to Docker Hub ─────
   - name: build-push-web
     image: woodpeckerci/plugin-docker-buildx
     privileged: true
