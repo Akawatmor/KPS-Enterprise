@@ -1,3 +1,6 @@
 [submodule "original-project"]
 	path = original-project
 	url = https://github.com/AmanPathak-DevOps/End-to-End-Kubernetes-Three-Tier-DevSecOps-Project.git
+[submodule "skoservice-datemaster"]
+	path = skoservice-datemaster
+	url = https://github.com/Akawatmor/SKOService-DateMaster.git
