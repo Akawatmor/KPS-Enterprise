@@ -60,10 +60,17 @@ func New(cfg config.Config, logger *log.Logger, st store.Adapter) *Service {
 	}
 }
 
-func (s *Service) AdapterKind() string   { return s.store.Kind() }
+// NewWithClock is like New but accepts a custom clock function. Use in tests.
+func NewWithClock(cfg config.Config, logger *log.Logger, st store.Adapter, clock func() time.Time) *Service {
+	s := New(cfg, logger, st)
+	s.clock = clock
+	return s
+}
+
+func (s *Service) AdapterKind() string            { return s.store.Kind() }
 func (s *Service) Ping(ctx context.Context) error { return s.store.Ping(ctx) }
-func (s *Service) Close() error          { return s.store.Close() }
-func (s *Service) Now() time.Time        { return s.clock() }
+func (s *Service) Close() error                   { return s.store.Close() }
+func (s *Service) Now() time.Time                 { return s.clock() }
 
 func (s *Service) nextID(prefix string) string {
 	value := atomic.AddUint64(&s.counter, 1)
