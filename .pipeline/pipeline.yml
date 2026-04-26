@@ -29,6 +29,8 @@ steps:
   # ── 1. Unit tests + race detector + coverage ─────────────────────────────
   - name: test-backend
     image: golang:1.22-bookworm
+    when:
+      branch: [main, develop]
     commands:
       - cd src/phase2-final/backend
       - go mod download
@@ -62,6 +64,8 @@ steps:
   # ── 4. TypeScript type-check ─────────────────────────────────────────────
   - name: typecheck-frontend
     image: node:20-bookworm-slim
+    when:
+      branch: [main, develop]
     commands:
       - cd src/phase2-final/frontend
       - npm ci
@@ -70,6 +74,8 @@ steps:
   # ── 5. Frontend unit tests ────────────────────────────────────────────────
   - name: test-frontend
     image: node:20-bookworm-slim
+    when:
+      branch: [main, develop]
     commands:
       - cd src/phase2-final/frontend
       - npm ci
