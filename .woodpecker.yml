@@ -28,7 +28,7 @@ steps:
 
   # ── 1. Unit tests + race detector + coverage ─────────────────────────────
   - name: test-backend
-    image: golang:1.22-bookworm
+    image: golang:1.25-bookworm
     when:
       branch: [main, develop]
     commands:
@@ -49,7 +49,7 @@ steps:
 
   # ── 3. Dependency vulnerability check (govulncheck — OWASP A06) ──────────
   - name: dep-check-backend
-    image: golang:1.22-bookworm
+    image: golang:1.25-bookworm
     when:
       branch: main
     commands:
