@@ -19,7 +19,7 @@ when:
 steps:
   # ── 1. Test backend ─────────────────────────────────────────────────────────
   - name: test-backend
-    image: golang:1.22-alpine
+    image: golang:1.25-alpine
     commands:
       - cd src/phase2-final/backend
       - go mod download
