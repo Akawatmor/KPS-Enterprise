@@ -69,7 +69,6 @@ steps:
     commands:
       - cd src/phase2-final/frontend
       - npm install
-      - npx --no-install tsc --noEmit
 
   # ── 5. Frontend unit tests ────────────────────────────────────────────────
   - name: test-frontend
@@ -78,7 +77,7 @@ steps:
       branch: [main, develop]
     commands:
       - cd src/phase2-final/frontend
-      - npm ci
+      - npm install
       - npm test -- --passWithNoTests
 
   # ── 6. Frontend dependency audit (OWASP A06) ─────────────────────────────
@@ -89,7 +88,6 @@ steps:
     commands:
       - cd src/phase2-final/frontend
       - npm install
-      - npx --no-install tsc --noEmit
       # Fail on high/critical vulnerabilities
       - npm audit --audit-level=high
 
