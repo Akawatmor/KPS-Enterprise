@@ -68,8 +68,8 @@ steps:
       branch: [main, develop]
     commands:
       - cd src/phase2-final/frontend
-      - npm ci
-      - npx tsc --noEmit
+      - npm install
+      - npx --no-install tsc --noEmit
 
   # ── 5. Frontend unit tests ────────────────────────────────────────────────
   - name: test-frontend
@@ -88,7 +88,8 @@ steps:
       branch: main
     commands:
       - cd src/phase2-final/frontend
-      - npm ci
+      - npm install
+      - npx --no-install tsc --noEmit
       # Fail on high/critical vulnerabilities
       - npm audit --audit-level=high
 
