@@ -9,6 +9,24 @@ Storage: iSCSI → Synology NAS
 
 ---
 
+## ✅ Prerequisites (สิ่งที่ต้องมีก่อนเริ่ม)
+
+| สิ่งที่ต้องการ | รายละเอียด |
+|---|---|
+| Proxmox VE | สร้าง VM ได้ (ทดสอบบน Proxmox 8.x) |
+| Debian 13 ISO | `debian-testing-amd64-netinst.iso` |
+| IP สำหรับ VMs | 192.168.111.42 / .43 / .44 |
+| IP สำหรับ MetalLB | 192.168.111.200-210 (ว่างในวง LAN) |
+| Synology NAS | 192.168.111.10, iSCSI enabled, MTU 9000 |
+| Docker Hub account | สำหรับ push images |
+| Gitea server | สำหรับ Woodpecker OAuth + webhook |
+| Domain + Cloudflare | สำหรับ public HTTPS |
+| Nginx (existing) | 192.168.111.171 ← reverse proxy |
+
+> **ก่อน Phase 0:** ตั้งค่า iSCSI บน Synology NAS ให้เรียบร้อยก่อน (Phase 7.0)
+
+---
+
 ## 📋 ภาพรวม Cluster
 
 ```
@@ -981,14 +999,23 @@ EOF
 ### 8.1 โครงสร้าง Project
 
 ```
-backend/
-├── main.go
-├── go.mod
-├── go.sum
-├── Dockerfile
-└── .woodpecker/
-    └── build.yaml
+repo/                          ← root ของ repository
+├── .woodpecker/               ← pipeline files (root-level)
+│   ├── backend.yaml
+│   ├── frontend.yaml
+│   └── notify.yaml
+├── backend/
+│   ├── main.go
+│   ├── go.mod
+│   ├── go.sum
+│   └── Dockerfile
+└── frontend/
+    ├── app/
+    ├── Dockerfile
+    └── package.json
 ```
+
+> **หมายเหตุ:** Pipeline files อยู่ที่ root `.woodpecker/` ไม่ได้อยู่ใน `backend/` เพื่อให้ Woodpecker discover ได้จาก repo root
 
 ### 8.2 โค้ด Backend
 
@@ -1203,7 +1230,7 @@ spec:
         app: backend
     spec:
       nodeSelector:
-        role: main
+        role: main              # backend รันบน VM1 ร่วมกับ PostgreSQL (latency ต่ำสุด)
       imagePullSecrets:
       - name: dockerhub-cred
       containers:
@@ -1370,7 +1397,7 @@ spec:
         app: frontend
     spec:
       nodeSelector:
-        role: main
+        role: main              # frontend ติดตาม backend บน VM1 เพื่อลด hop
       imagePullSecrets:
       - name: dockerhub-cred
       containers:
@@ -2365,13 +2392,20 @@ kubectl set image deployment/backend backend=...:a1b2c3d
 ## 📝 Quick Reference Commands
 
 ```bash
-# ── Pod Status ──
+# ── Cluster Health ──
+kubectl get nodes -o wide
 kubectl get pods -A
+kubectl top nodes
+
+# ── Pod Status ──
 kubectl get pods -n app -o wide
+kubectl get pods -n woodpecker -o wide
 
 # ── Logs ──
 kubectl logs -n app deployment/backend --tail=50 -f
 kubectl logs -n app deployment/frontend --tail=20
+kubectl logs -n app -l app=postgresql --tail=30
+kubectl logs -n woodpecker deployment/woodpecker-server --tail=50
 
 # ── Resource Usage ──
 kubectl top nodes
@@ -2379,13 +2413,17 @@ kubectl top pods -n app
 
 # ── Restart Deployment ──
 kubectl rollout restart deployment/backend -n app
+kubectl rollout restart deployment/frontend -n app
 kubectl rollout status deployment/backend -n app
 
 # ── Rollback ──
 kubectl rollout undo deployment/backend -n app
+kubectl rollout undo deployment/frontend -n app
+kubectl rollout history deployment/backend -n app
 
 # ── Port Forward (debug) ──
 kubectl port-forward -n app svc/backend 8000:8000
+kubectl port-forward -n app svc/frontend 3000:3000
 kubectl port-forward -n woodpecker svc/woodpecker-server 8888:8000
 
 # ── iSCSI ──
@@ -2393,9 +2431,17 @@ sudo iscsiadm -m session                        # ดู sessions
 sudo iscsiadm -m session -P 3                   # ดู disk device
 sudo systemctl restart open-iscsi iscsid        # restart iscsi
 lsblk | grep sd                                 # ดู block devices
+df -h | grep sdb                                # ดู disk usage
 
 # ── Secrets ──
 kubectl get secret pg-secret -n app -o jsonpath='{.data.url}' | base64 -d
+kubectl get secrets -n app
+kubectl get secrets -n woodpecker
+
+# ── Describe (troubleshoot) ──
+kubectl describe pod -n app -l app=backend | tail -30
+kubectl describe pvc pg-iscsi-pvc -n app
+kubectl describe node k3s-ci
 
 # ── Shell into Pod (frontend มี shell เพราะใช้ node image) ──
 kubectl exec -it -n app deployment/frontend -- /bin/sh
