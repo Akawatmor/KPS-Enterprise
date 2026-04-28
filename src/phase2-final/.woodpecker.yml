@@ -1,0 +1,148 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Woodpecker CI/CD Pipeline — TodoApp Big Calendar
+# Infrastructure: K3s 3-node (1 master + 2 workers) · Docker Hub · Woodpecker
+#
+# Required Woodpecker secrets (set in project Settings → Secrets):
+#   DOCKER_USERNAME   — Docker Hub username
+#   DOCKER_PASSWORD   — Docker Hub access token (not plain password)
+#   KUBECONFIG_B64    — base64-encoded kubeconfig pointing at K3s master
+#
+# Pipeline runs on every push to 'main' branch.
+# ─────────────────────────────────────────────────────────────────────────────
+
+when:
+  event: push
+  branch: main
+
+steps:
+  # ── 1. Test backend ─────────────────────────────────────────────────────────
+  - name: test-backend
+    image: golang:1.22-alpine
+    commands:
+      - cd src/phase2-final/backend
+      - go mod download
+      - go vet ./...
+      - go test ./... -v -count=1
+
+  # ── 2. Build & push backend image to Docker Hub ─────────────────────────────
+  # NOTE: Replace YOURDOCKERHUB with your actual Docker Hub username,
+  # or use a shell step (see build-push-core-shell alternative below).
+  - name: build-push-core
+    image: woodpeckerci/plugin-docker-buildx
+    privileged: true
+    settings:
+      dockerfile: src/phase2-final/backend/Dockerfile
+      context: src/phase2-final/backend
+      # Replace YOURDOCKERHUB with your Docker Hub username.
+      repo: akawatmor/todoapp-core
+      tags:
+        - "${CI_COMMIT_SHA:0:7}"
+        - latest
+      username:
+        from_secret: DOCKER_USERNAME
+      password:
+        from_secret: DOCKER_PASSWORD
+
+  # ── 3. Build & push frontend image to Docker Hub ────────────────────────────
+  - name: build-push-web
+    image: woodpeckerci/plugin-docker-buildx
+    privileged: true
+    settings:
+      dockerfile: src/phase2-final/frontend/Dockerfile
+      context: src/phase2-final/frontend
+      # NEXT_PUBLIC_API_BASE_URL is intentionally empty — uses relative paths via Traefik ingress.
+      build_args:
+        - NEXT_PUBLIC_API_BASE_URL=
+      repo: akawatmor/todoapp-web
+      tags:
+        - "${CI_COMMIT_SHA:0:7}"
+        - latest
+      username:
+        from_secret: DOCKER_USERNAME
+      password:
+        from_secret: DOCKER_PASSWORD
+
+  # ── 4. Deploy to K3s via kubectl ────────────────────────────────────────────
+  - name: deploy-k3s
+    image: bitnami/kubectl:1.29
+    environment:
+      KUBECONFIG_B64:
+        from_secret: KUBECONFIG_B64
+      DOCKER_USERNAME:
+        from_secret: DOCKER_USERNAME
+    commands:
+      # Decode kubeconfig
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+
+      # Verify connectivity to K3s master
+      - kubectl cluster-info
+
+      # Apply namespace, configmap, PVC (idempotent)
+      - kubectl apply -f src/phase2-final/k8s/namespace.yaml
+      - kubectl apply -f src/phase2-final/k8s/configmap.yaml
+      - kubectl apply -f src/phase2-final/k8s/core-pvc.yaml
+      - kubectl apply -f src/phase2-final/k8s/core-service.yaml
+      - kubectl apply -f src/phase2-final/k8s/web-service.yaml
+      - kubectl apply -f src/phase2-final/k8s/ingress.yaml
+
+      # Update core deployment image to the new Docker Hub tag
+      - >
+        kubectl set image deployment/todoapp-core
+        core=${DOCKER_USERNAME}/todoapp-core:${CI_COMMIT_SHA:0:7}
+        -n todoapp
+
+      # Update web deployment image
+      - >
+        kubectl set image deployment/todoapp-web
+        web=${DOCKER_USERNAME}/todoapp-web:${CI_COMMIT_SHA:0:7}
+        -n todoapp
+
+      # Wait for rollouts (timeout 3 min each)
+      - kubectl rollout status deployment/todoapp-core -n todoapp --timeout=180s
+      - kubectl rollout status deployment/todoapp-web  -n todoapp --timeout=180s
+
+      # Smoke test — curl the health endpoint via the in-cluster service
+      - >
+        kubectl run smoke-test-${CI_COMMIT_SHA:0:7}
+        --image=curlimages/curl:8.7.1
+        --restart=Never
+        --rm
+        -i
+        -n todoapp
+        -- curl -sf http://todoapp-core:8080/healthz
+
+      # Cleanup kubeconfig
+      - rm -f /tmp/kubeconfig
+
+  # ── 5. Email notification ────────────────────────────────────────────────────
+  # Required secrets: SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, NOTIFY_EMAIL
+  - name: notify-email
+    image: drillster/drone-email
+    settings:
+      host:
+        from_secret: SMTP_HOST
+      port: 587
+      username:
+        from_secret: SMTP_USERNAME
+      password:
+        from_secret: SMTP_PASSWORD
+      from:
+        from_secret: SMTP_USERNAME
+      to:
+        from_secret: NOTIFY_EMAIL
+      subject: >-
+        [KPS] ${CI_BUILD_STATUS} — ${CI_REPO_NAME} branch:${CI_COMMIT_BRANCH}
+        commit:${CI_COMMIT_SHA:0:7}
+      body: >
+        Pipeline: ${CI_BUILD_STATUS}
+        Repo: ${CI_REPO_NAME}
+        Branch: ${CI_COMMIT_BRANCH}
+        Commit: ${CI_COMMIT_SHA:0:7}
+        Author: ${CI_COMMIT_AUTHOR}
+        Message: ${CI_COMMIT_MESSAGE}
+        Link: ${CI_BUILD_LINK}
+    when:
+      status:
+        - success
+        - failure

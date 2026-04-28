@@ -1,0 +1,43 @@
+# Frontend Deployment
+# Modified for KPS-Enterprise with Docker Hub images (ECR is read-only in Learner Lab)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: three-tier
+  labels:
+    role: frontend
+    env: demo
+    app: kps-frontend
+spec: 
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 25%
+  selector:
+    matchLabels: 
+      role: frontend
+  template:
+    metadata:
+      labels:
+        role: frontend
+    spec: 
+      # NOTE: Remove imagePullSecrets if using public Docker Hub images
+      # Uncomment below line if using private Docker Hub repository
+      # imagePullSecrets:
+      # - name: dockerhub-secret
+      containers:
+      - name: frontend
+        # IMPORTANT: Change DOCKERHUB_USER to your Docker Hub username
+        # This will be auto-updated by Jenkins pipeline
+        image: akawatmor/kps-frontend:8
+        imagePullPolicy: Always
+        env:
+          # IMPORTANT: Change this to your ALB DNS name or domain
+          # Example: http://k8s-threetie-mainlb-xxxx.us-east-1.elb.amazonaws.com/api/tasks
+          - name: REACT_APP_BACKEND_URL
+            value: "http://YOUR_ALB_DNS_OR_DOMAIN/api/tasks"
+        ports:
+        - containerPort: 3000

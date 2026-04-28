@@ -1,0 +1,17 @@
+# KPS-Enterprise Deployment Info
+# Generated: Wed Apr  1 06:43:01 PM UTC 2026
+
+NAMESPACE=three-tier
+DOCKERHUB_USER=akawatmor
+IMAGE_TAG=latest
+ALB_DNS=
+
+# URLs
+FRONTEND_URL=http:///
+BACKEND_URL=http:///api/tasks
+HEALTH_URL=http:///api/healthz
+
+# Kubectl commands
+kubectl get pods -n three-tier
+kubectl get svc -n three-tier
+kubectl get ingress -n three-tier

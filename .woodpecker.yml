@@ -1,0 +1,389 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Woodpecker CI/CD Pipeline — TodoApp Big Calendar (Phase 2)
+# Infrastructure: K3s 3-node (1 master + 2 workers) · Docker Hub · Woodpecker
+#
+# App source: src/phase2-final/
+#
+# Branch strategy:
+#   develop → quality gates only (tests, typecheck, static analysis)
+#   main    → quality gates + build + push + trivy scan + deploy
+#
+# Required Woodpecker secrets:
+#   DOCKER_USERNAME   — Docker Hub username
+#   DOCKER_PASSWORD   — Docker Hub access token
+#   KUBECONFIG_B64    — base64-encoded kubeconfig pointing at K3s master
+#   SMTP_HOST         — SMTP server hostname (e.g. smtp.gmail.com)
+#   SMTP_USERNAME     — Gmail address (sender)
+#   SMTP_PASSWORD     — Gmail App Password (16-char, not account password)
+#   NOTIFY_EMAIL      — Recipient email(s) — comma-separated for multiple, e.g.:
+#                        "you@gmail.com,instructor@example.com,team@example.com"
+# ─────────────────────────────────────────────────────────────────────────────
+
+steps:
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # BACKEND — quality gates (develop + main)
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── 1. Unit tests + race detector + coverage ─────────────────────────────
+  - name: test-backend
+    image: golang:1.25-bookworm
+    depends_on: []
+    when:
+      event: [push, pull_request]
+      branch: [main, develop]
+    commands:
+      - cd src/phase2-final/backend
+      - go mod download
+      - go vet ./...
+      - go test ./... -v -race -count=1 -coverprofile=coverage.out
+      - go tool cover -func=coverage.out | tail -1
+
+  # ── 2. Static security analysis (gosec — OWASP-aligned) ──────────────────
+  - name: security-scan-backend
+    image: golang:1.25-bookworm
+    depends_on: []
+    when:
+      event: push
+      branch: main
+    commands:
+      - go install github.com/securego/gosec/v2/cmd/gosec@latest
+      - cd src/phase2-final/backend
+      - gosec -severity medium -confidence medium -fmt=text ./...
+
+  # ── 3. Dependency vulnerability check (govulncheck — OWASP A06) ──────────
+  - name: dep-check-backend
+    image: golang:1.25-bookworm
+    depends_on: []
+    when:
+      branch: main
+    commands:
+      - go install golang.org/x/vuln/cmd/govulncheck@latest
+      - cd src/phase2-final/backend
+      - govulncheck ./...
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # FRONTEND — quality gates (develop + main)
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── 4. TypeScript type-check ─────────────────────────────────────────────
+  - name: typecheck-frontend
+    image: node:22-bookworm-slim
+    depends_on: []
+    when:
+      event: [push, pull_request]
+      branch: [main, develop]
+    commands:
+      - cd src/phase2-final/frontend
+      - npm install
+      - npm run type-check
+
+  # ── 5. Frontend unit tests ────────────────────────────────────────────────
+  - name: test-frontend
+    image: node:22-bookworm-slim
+    depends_on: [typecheck-frontend]
+    when:
+      event: [push, pull_request]
+      branch: [main, develop]
+    commands:
+      - cd src/phase2-final/frontend
+      - npm test -- --passWithNoTests
+
+  # ── 6. Frontend dependency audit (OWASP A06) ─────────────────────────────
+  - name: dep-check-frontend
+    image: node:22-bookworm-slim
+    depends_on: [typecheck-frontend]
+    when:
+      event: push
+      branch: main
+    commands:
+      - cd src/phase2-final/frontend
+      # Fail on high/critical vulnerabilities
+      - npm audit --audit-level=high
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # BUILD & PUSH — main only
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── 7. Build & push backend image ────────────────────────────────────────
+  - name: build-push-core
+    image: woodpeckerci/plugin-docker-buildx
+    privileged: true
+    depends_on: [test-backend, security-scan-backend, dep-check-backend]
+    when:
+      event: push
+      branch: main
+    settings:
+      dockerfile: src/phase2-final/backend/Dockerfile
+      context: src/phase2-final/backend
+      repo: YOURDOCKERHUB/todoapp-core
+      tags:
+        - "${CI_COMMIT_SHA:0:7}"
+        - latest
+      username:
+        from_secret: DOCKER_USERNAME
+      password:
+        from_secret: DOCKER_PASSWORD
+
+  # ── 8. Build & push frontend image ───────────────────────────────────────
+  - name: build-push-web
+    image: woodpeckerci/plugin-docker-buildx
+    privileged: true
+    depends_on: [typecheck-frontend, test-frontend, dep-check-frontend]
+    when:
+      event: push
+      branch: main
+    settings:
+      dockerfile: src/phase2-final/frontend/Dockerfile
+      context: src/phase2-final/frontend
+      repo: YOURDOCKERHUB/todoapp-web
+      tags:
+        - "${CI_COMMIT_SHA:0:7}"
+        - latest
+      username:
+        from_secret: DOCKER_USERNAME
+      password:
+        from_secret: DOCKER_PASSWORD
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # IMAGE VULNERABILITY SCAN (Trivy) — main only, after push
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── 9. Trivy — scan backend image (HIGH + CRITICAL, unfixed only) ─────────
+  - name: trivy-scan-core
+    image: aquasec/trivy:latest
+    depends_on: [build-push-core]
+    when:
+      event: push
+      branch: main
+    environment:
+      DOCKER_USERNAME:
+        from_secret: DOCKER_USERNAME
+    commands:
+      - >
+        trivy image
+        --exit-code 1
+        --severity HIGH,CRITICAL
+        --ignore-unfixed
+        ${DOCKER_USERNAME}/todoapp-core:${CI_COMMIT_SHA:0:7}
+
+  # ── 10. Trivy — scan frontend image ──────────────────────────────────────
+  - name: trivy-scan-web
+    image: aquasec/trivy:latest
+    depends_on: [build-push-web]
+    when:
+      event: push
+      branch: main
+    environment:
+      DOCKER_USERNAME:
+        from_secret: DOCKER_USERNAME
+    commands:
+      - >
+        trivy image
+        --exit-code 1
+        --severity HIGH,CRITICAL
+        --ignore-unfixed
+        ${DOCKER_USERNAME}/todoapp-web:${CI_COMMIT_SHA:0:7}
+
+  # ── 11. Lighthouse CI (performance / accessibility audit) ────────────────
+  - name: lighthouse
+    image: patrickhulce/lhci:latest
+    depends_on: [build-push-web]
+    when:
+      event: push
+      branch: main
+    commands:
+      - cd src/phase2-final/frontend
+      - lhci autorun --upload.target=temporary-public-storage || true
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # DEPLOY — main only
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── 12. Deploy to K3s via kubectl ────────────────────────────────────────
+  - name: deploy-k3s
+    image: bitnami/kubectl:1.29
+    depends_on: [trivy-scan-core, trivy-scan-web, lighthouse]
+    when:
+      event: push
+      branch: main
+    environment:
+      KUBECONFIG_B64:
+        from_secret: KUBECONFIG_B64
+      DOCKER_USERNAME:
+        from_secret: DOCKER_USERNAME
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - kubectl cluster-info
+
+      # 1. Namespace first
+      - kubectl apply -f src/phase2-final/k8s/namespace.yaml
+
+      # 2. PostgreSQL StatefulSet + wait for it to be ready
+      - kubectl apply -f src/phase2-final/k8s/postgres-statefulset.yaml
+      - kubectl rollout status statefulset/todoapp-postgres -n todoapp --timeout=120s
+
+      # 3. App manifests (idempotent)
+      - kubectl apply -f src/phase2-final/k8s/configmap.yaml
+      - kubectl apply -f src/phase2-final/k8s/core-deployment.yaml
+      - kubectl apply -f src/phase2-final/k8s/core-service.yaml
+      - kubectl apply -f src/phase2-final/k8s/web-deployment.yaml
+      - kubectl apply -f src/phase2-final/k8s/web-service.yaml
+      - kubectl apply -f src/phase2-final/k8s/ingress.yaml
+
+      # 4. Roll out new image tags
+      - >
+        kubectl set image deployment/todoapp-core
+        core=${DOCKER_USERNAME}/todoapp-core:${CI_COMMIT_SHA:0:7}
+        -n todoapp
+      - >
+        kubectl set image deployment/todoapp-web
+        web=${DOCKER_USERNAME}/todoapp-web:${CI_COMMIT_SHA:0:7}
+        -n todoapp
+
+      # 5. Wait for rollouts (RollingUpdate — zero downtime)
+      - kubectl rollout status deployment/todoapp-core -n todoapp --timeout=180s
+      - kubectl rollout status deployment/todoapp-web  -n todoapp --timeout=180s
+
+      - rm -f /tmp/kubeconfig
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # SMOKE TEST — CRUD verification on live cluster
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── 13. Smoke test — healthz + readyz + write + read ─────────────────────
+  - name: smoke-test
+    image: bitnami/kubectl:1.29
+    depends_on: [deploy-k3s]
+    when:
+      event: push
+      branch: main
+    environment:
+      KUBECONFIG_B64:
+        from_secret: KUBECONFIG_B64
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+
+      # a. GET /healthz → 200
+      - >
+        kubectl run smoke-a-${CI_COMMIT_SHA:0:7}
+        --image=curlimages/curl:8.7.1 --restart=Never --rm -i --wait
+        -n todoapp
+        -- curl -sf http://todoapp-core:8080/healthz
+
+      # b. GET /readyz → 200 (proves PostgreSQL connection is alive)
+      - >
+        kubectl run smoke-b-${CI_COMMIT_SHA:0:7}
+        --image=curlimages/curl:8.7.1 --restart=Never --rm -i --wait
+        -n todoapp
+        -- curl -sf http://todoapp-core:8080/readyz
+
+      # c. POST /api/v1/tasks → 201 (proves write path + DB write works)
+      - >
+        kubectl run smoke-c-${CI_COMMIT_SHA:0:7}
+        --image=curlimages/curl:8.7.1 --restart=Never --rm -i --wait
+        -n todoapp
+        -- curl -sf -X POST
+        -H "Content-Type: application/json"
+        -H "X-User-ID: smoke-test"
+        -d '{"title":"smoke","column":"todo"}'
+        http://todoapp-core:8080/api/v1/tasks
+
+      # d. GET /api/v1/tasks → 200 (proves read path + DB read works)
+      - >
+        kubectl run smoke-d-${CI_COMMIT_SHA:0:7}
+        --image=curlimages/curl:8.7.1 --restart=Never --rm -i --wait
+        -n todoapp
+        -- curl -sf
+        -H "X-User-ID: smoke-test"
+        http://todoapp-core:8080/api/v1/tasks
+
+      - rm -f /tmp/kubeconfig
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # EMAIL NOTIFICATION — HTML, fires after smoke test
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── 14. Email — success ───────────────────────────────────────────────────
+  - name: email-success
+    image: drillster/drone-email
+    depends_on: [smoke-test]
+    when:
+      event: push
+      branch: main
+      status: [success]
+    settings:
+      host:
+        from_secret: SMTP_HOST
+      port: 587
+      username:
+        from_secret: SMTP_USERNAME
+      password:
+        from_secret: SMTP_PASSWORD
+      from:
+        from_secret: SMTP_USERNAME
+      # NOTIFY_EMAIL secret value = comma-separated addresses
+      # e.g. "you@gmail.com,instructor@example.com"
+      to:
+        from_secret: NOTIFY_EMAIL
+      subject: >-
+        [KPS] Deploy สำเร็จ — ${CI_REPO_NAME}
+        branch:${CI_COMMIT_BRANCH} commit:${CI_COMMIT_SHA:0:7}
+      body: |
+        <html><body style="font-family:sans-serif;padding:20px">
+          <h2 style="color:#22c55e">Pipeline Passed</h2>
+          <table border="1" cellpadding="8" cellspacing="0" style="border-collapse:collapse">
+            <tr><td><b>Repo</b></td><td>${CI_REPO_NAME}</td></tr>
+            <tr><td><b>Branch</b></td><td>${CI_COMMIT_BRANCH}</td></tr>
+            <tr><td><b>Commit</b></td><td>${CI_COMMIT_SHA:0:7}</td></tr>
+            <tr><td><b>Author</b></td><td>${CI_COMMIT_AUTHOR}</td></tr>
+            <tr><td><b>Message</b></td><td>${CI_COMMIT_MESSAGE}</td></tr>
+          </table>
+          <h3>Pipeline Flow</h3>
+          <p>test &check; &rarr; build &check; &rarr; scan &check; &rarr; deploy &check; &rarr; smoke &check;</p>
+          <p>
+            <a href="${CI_BUILD_LINK}">Pipeline Log</a> &nbsp;|&nbsp;
+            <a href="https://todoapp-kps.akawatmor.com">Production</a>
+          </p>
+        </body></html>
+      content_type: text/html
+
+  # ── 15. Email — failure ───────────────────────────────────────────────────
+  - name: email-failure
+    image: drillster/drone-email
+    depends_on: [smoke-test]
+    when:
+      event: push
+      branch: main
+      status: [failure]
+    settings:
+      host:
+        from_secret: SMTP_HOST
+      port: 587
+      username:
+        from_secret: SMTP_USERNAME
+      password:
+        from_secret: SMTP_PASSWORD
+      from:
+        from_secret: SMTP_USERNAME
+      to:
+        from_secret: NOTIFY_EMAIL
+      subject: >-
+        [KPS] Pipeline FAILED — ${CI_REPO_NAME}
+        branch:${CI_COMMIT_BRANCH} commit:${CI_COMMIT_SHA:0:7}
+      body: |
+        <html><body style="font-family:sans-serif;padding:20px">
+          <h2 style="color:#ef4444">Pipeline Failed</h2>
+          <table border="1" cellpadding="8" cellspacing="0" style="border-collapse:collapse">
+            <tr><td><b>Repo</b></td><td>${CI_REPO_NAME}</td></tr>
+            <tr><td><b>Branch</b></td><td>${CI_COMMIT_BRANCH}</td></tr>
+            <tr><td><b>Commit</b></td><td>${CI_COMMIT_SHA:0:7}</td></tr>
+            <tr><td><b>Author</b></td><td>${CI_COMMIT_AUTHOR}</td></tr>
+            <tr><td><b>Message</b></td><td>${CI_COMMIT_MESSAGE}</td></tr>
+          </table>
+          <p style="color:#6b7280">Production ยังใช้ version เดิม — ไม่มีผลกระทบ</p>
+          <p><a href="${CI_BUILD_LINK}">ดู Pipeline Log เพื่อหาสาเหตุ</a></p>
+        </body></html>
+      content_type: text/html

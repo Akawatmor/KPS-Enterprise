@@ -1,0 +1,64 @@
+# ALB Ingress for KPS-Enterprise
+# Modified for AWS Learner Lab
+# NOTE: AWS Load Balancer Controller must be installed on EKS cluster
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mainlb
+  namespace: three-tier
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    # Uncomment and fill in your subnet IDs if auto-discovery fails
+    # alb.ingress.kubernetes.io/subnets: "subnet-xxx,subnet-yyy,subnet-zzz"
+    
+    # Optional: Health check settings
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "15"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+    
+    # Optional: Add tags to ALB
+    alb.ingress.kubernetes.io/tags: Environment=demo,Project=KPS-Enterprise
+spec:
+  ingressClassName: alb
+  rules:
+    # NOTE: Remove 'host' to use ALB DNS name directly (no custom domain needed)
+    # If you have a custom domain, add it here: host: your-domain.com
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 3500
+          - path: /healthz
+            pathType: Exact
+            backend:
+              service:
+                name: api
+                port:
+                  number: 3500
+          - path: /ready
+            pathType: Exact
+            backend:
+              service:
+                name: api
+                port:
+                  number: 3500
+          - path: /started
+            pathType: Exact
+            backend:
+              service:
+                name: api
+                port:
+                  number: 3500
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 3000

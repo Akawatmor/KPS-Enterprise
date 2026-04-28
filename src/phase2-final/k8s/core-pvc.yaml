@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: todoapp-sqlite-pvc
+  namespace: todoapp
+spec:
+  # K3s uses local-path provisioner by default.
+  # Remove storageClassName to use cluster default.
+  storageClassName: local-path
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
