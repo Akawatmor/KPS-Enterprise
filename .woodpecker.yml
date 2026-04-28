@@ -41,11 +41,13 @@ steps:
 
   # ── 2. Static security analysis (gosec — OWASP-aligned) ──────────────────
   - name: security-scan-backend
-    image: securego/gosec:2.20.0
+    image: golang:1.25-bookworm
     depends_on: []
     when:
+      event: push
       branch: main
     commands:
+      - go install github.com/securego/gosec/v2/cmd/gosec@latest
       - cd src/phase2-final/backend
       - gosec -severity medium -confidence medium -fmt=text ./...
 
@@ -79,24 +81,23 @@ steps:
   # ── 5. Frontend unit tests ────────────────────────────────────────────────
   - name: test-frontend
     image: node:22-bookworm-slim
-    depends_on: []
+    depends_on: [typecheck-frontend]
     when:
       event: [push, pull_request]
       branch: [main, develop]
     commands:
       - cd src/phase2-final/frontend
-      - npm install
       - npm test -- --passWithNoTests
 
   # ── 6. Frontend dependency audit (OWASP A06) ─────────────────────────────
   - name: dep-check-frontend
     image: node:22-bookworm-slim
-    depends_on: []
+    depends_on: [typecheck-frontend]
     when:
+      event: push
       branch: main
     commands:
       - cd src/phase2-final/frontend
-      - npm install
       # Fail on high/critical vulnerabilities
       - npm audit --audit-level=high
 
