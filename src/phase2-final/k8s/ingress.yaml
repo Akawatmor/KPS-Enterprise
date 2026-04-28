@@ -9,12 +9,12 @@ metadata:
   annotations:
     # Traefik (K3s default ingress)
     traefik.ingress.kubernetes.io/router.entrypoints: web
-    # Strip the /api prefix before forwarding to the backend.
-    traefik.ingress.kubernetes.io/router.middlewares: todoapp-strip-api@kubernetescrd
+    # NOTE: No strip-prefix middleware — backend routes are registered at /api/v1/...
+    # Traefik forwards the full path including /api prefix to todoapp-core.
 spec:
   ingressClassName: traefik
   rules:
-    - host: todoapp.local
+    - host: todoapp-kps.akawatmor.com
       http:
         paths:
           # Backend API

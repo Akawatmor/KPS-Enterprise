@@ -11,6 +11,5 @@ data:
   CALDAV_TICK_SECONDS: "60"
   AUTH_ACCESS_TOKEN_MINUTES: "15"
   AUTH_REFRESH_TOKEN_MINUTES: "10080"
-  # ALLOWED_ORIGIN is set to the frontend ingress hostname.
-  # Update this to match your actual domain.
-  ALLOWED_ORIGIN: "http://todoapp.local"
+  # ALLOWED_ORIGIN must match the frontend domain for CORS.
+  ALLOWED_ORIGIN: "https://todoapp-kps.akawatmor.com"

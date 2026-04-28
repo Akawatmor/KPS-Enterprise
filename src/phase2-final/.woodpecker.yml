@@ -34,7 +34,7 @@ steps:
       dockerfile: src/phase2-final/backend/Dockerfile
       context: src/phase2-final/backend
       # Replace YOURDOCKERHUB with your Docker Hub username.
-      repo: YOURDOCKERHUB/todoapp-core
+      repo: akawatmor/todoapp-core
       tags:
         - "${CI_COMMIT_SHA:0:7}"
         - latest
@@ -50,8 +50,10 @@ steps:
     settings:
       dockerfile: src/phase2-final/frontend/Dockerfile
       context: src/phase2-final/frontend
-      # Replace YOURDOCKERHUB with your Docker Hub username.
-      repo: YOURDOCKERHUB/todoapp-web
+      # NEXT_PUBLIC_API_BASE_URL is intentionally empty — uses relative paths via Traefik ingress.
+      build_args:
+        - NEXT_PUBLIC_API_BASE_URL=
+      repo: akawatmor/todoapp-web
       tags:
         - "${CI_COMMIT_SHA:0:7}"
         - latest
@@ -112,3 +114,35 @@ steps:
 
       # Cleanup kubeconfig
       - rm -f /tmp/kubeconfig
+
+  # ── 5. Email notification ────────────────────────────────────────────────────
+  # Required secrets: SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, NOTIFY_EMAIL
+  - name: notify-email
+    image: drillster/drone-email
+    settings:
+      host:
+        from_secret: SMTP_HOST
+      port: 587
+      username:
+        from_secret: SMTP_USERNAME
+      password:
+        from_secret: SMTP_PASSWORD
+      from:
+        from_secret: SMTP_USERNAME
+      to:
+        from_secret: NOTIFY_EMAIL
+      subject: >-
+        [KPS] ${CI_BUILD_STATUS} — ${CI_REPO_NAME} branch:${CI_COMMIT_BRANCH}
+        commit:${CI_COMMIT_SHA:0:7}
+      body: >
+        Pipeline: ${CI_BUILD_STATUS}
+        Repo: ${CI_REPO_NAME}
+        Branch: ${CI_COMMIT_BRANCH}
+        Commit: ${CI_COMMIT_SHA:0:7}
+        Author: ${CI_COMMIT_AUTHOR}
+        Message: ${CI_COMMIT_MESSAGE}
+        Link: ${CI_BUILD_LINK}
+    when:
+      status:
+        - success
+        - failure

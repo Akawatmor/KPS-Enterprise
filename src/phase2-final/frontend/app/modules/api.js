@@ -1,4 +1,6 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080";
+// Empty string → relative paths (same-domain via Traefik ingress in K3s).
+// Set NEXT_PUBLIC_API_BASE_URL at build time only for cross-origin setups.
+export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 // ── Token / User storage ──────────────────────────────────────────────────────
 export function getStoredToken() {

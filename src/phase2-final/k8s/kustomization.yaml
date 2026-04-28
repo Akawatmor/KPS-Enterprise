@@ -6,7 +6,12 @@ namespace: todoapp
 resources:
   - namespace.yaml
   - configmap.yaml
-  - secret.sample.yaml
+  # NOTE: Do NOT apply secret.sample.yaml directly.
+  # Create the real secret first:
+  #   kubectl create secret generic todoapp-secret -n todoapp \
+  #     --from-literal=GITHUB_OAUTH_CLIENT_ID=<id> \
+  #     --from-literal=GITHUB_OAUTH_CLIENT_SECRET=<secret>
+  # - secret.sample.yaml
   - core-pvc.yaml
   - core-deployment.yaml
   - core-service.yaml

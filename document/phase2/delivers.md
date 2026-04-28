@@ -28,22 +28,21 @@
 | **การทดสอบ** | มักข้ามเพราะเสียเวลา | บังคับผ่านก่อน deploy ได้ |
 | **Rollback** | จำ version เก่าไม่ได้, ยาก | `kubectl rollout undo` ทันที |
 | **Visibility** | ไม่รู้ว่าใคร deploy อะไร เมื่อไหร่ | ดูได้จาก Woodpecker UI + Git log |
-| **Security Scan** | ไม่มี | Trivy scan ทุก build อัตโนมัติ |
-| **Notification** | ไม่รู้ว่า deploy สำเร็จหรือล้มเหลว | แจ้ง Discord ทันที |
+| **Security Scan** | ไม่มี | `go vet` + `go test` บังคับผ่านก่อน build |
+| **Notification** | ไม่รู้ว่า deploy สำเร็จหรือล้มเหลว | แจ้ง Email ทันที |
 
 ### 1.2 สิ่งที่ Pipeline ทำให้ได้โดยตรง
 
 ```
 git push origin main
     │
-    ├── ✅ โค้ดผ่าน unit test ทุก function
-    ├── ✅ Go vet / TypeScript type-check ผ่าน
-    ├── ✅ Security scan ไม่พบ HIGH/CRITICAL CVE
-    ├── ✅ Docker image build สำเร็จ
+    ├── ✅ โค้ดผ่าน unit test ทุก function (`go test ./... -v -count=1`)
+    ├── ✅ go vet ผ่าน (ไม่มี compile error)
+    ├── ✅ Docker image build สำเร็จ (backend + frontend)
     ├── ✅ Image push ไป Docker Hub ด้วย commit SHA tag (immutable)
     ├── ✅ Rolling deploy บน K3s (zero downtime)
-    ├── ✅ Kubernetes health check ผ่าน
-    └── ✅ Discord notification ส่งถึงทีม
+    ├── ✅ Kubernetes health check (/healthz, /readyz) ผ่าน
+    └── ✅ Email notification ส่งถึงผู้รับที่กำหนด
 ```
 
 ### 1.3 ตัวชี้วัดที่ปรับปรุง (DevOps Metrics)
@@ -66,7 +65,7 @@ git push origin main
 | **License** | Apache 2.0 (Free) | MIT (Free) | Proprietary (Free tier) |
 | **Self-hosted** | ✅ ใช่ | ✅ ใช่ | ❌ ต้องใช้ GitHub Cloud |
 | **Kubernetes-native** | ✅ Native (backend: k8s) | ⚠️ ต้อง plugin | ❌ ไม่รองรับ |
-| **Gitea integration** | ✅ First-class | ⚠️ Plugin ที่ไม่สมบูรณ์ | ❌ ไม่รองรับ |
+| **GitHub integration** | ✅ First-class OAuth | ⚠️ Plugin ที่ไม่สมบูรณ์ | ✅ Native |
 | **Pipeline syntax** | YAML (เรียบง่าย) | Groovy/Jenkinsfile (ซับซ้อน) | YAML (ซับซ้อน) |
 | **RAM เมื่อ idle** | ~64 MB | ~512 MB – 1 GB | N/A |
 | **Setup time** | 15 นาที | 1–2 ชั่วโมง | 0 (แต่ต้องใช้ GitHub) |
@@ -90,17 +89,17 @@ Woodpecker + K8s:
   → Pipeline container = K8s Pod → ใช้ resource limits/requests ของ K8s
 ```
 
-#### เหตุผล 2: Gitea OAuth integration แบบ first-class
+#### เหตุผล 2: GitHub OAuth integration แบบ first-class
 ```yaml
 # Woodpecker config - เพียงแค่นี้
-WOODPECKER_GITEA: "true"
-WOODPECKER_GITEA_URL: "https://git.yourdomain.com"
-WOODPECKER_GITEA_CLIENT: "<oauth_client_id>"
-WOODPECKER_GITEA_SECRET: "<oauth_secret>"
-# → webhook สร้างอัตโนมัติ, login ผ่าน Gitea OAuth
+WOODPECKER_GITHUB: "true"
+WOODPECKER_GITHUB_CLIENT: "<github_oauth_client_id>"
+WOODPECKER_GITHUB_SECRET: "<github_oauth_secret>"
+# → webhook สร้างอัตโนมัติเมื่อ Activate repo ใน Woodpecker UI
+# → login ผ่าน GitHub OAuth
 ```
 
-Jenkins + Gitea ต้องการ plugin 3 ตัว (Gitea Plugin, Generic Webhook, Gitea OAuth), configure หลายหน้าจอ
+Jenkins + GitHub ต้องการ plugin หลายตัว (GitHub Plugin, Generic Webhook Trigger, GitHub OAuth), configure หลายหน้าจอ
 
 #### เหตุผล 3: Resource constraint
 เราทำงานบน VM ที่ RAM จำกัด (12 GB สำหรับ VM1 ที่รัน K3s server + App pods):
@@ -109,18 +108,29 @@ Jenkins + Gitea ต้องการ plugin 3 ตัว (Gitea Plugin, Generic 
 
 #### เหตุผล 4: Pipeline-as-Code ที่อ่านง่าย
 ```yaml
-# Woodpecker — ชัดเจน อ่านเข้าใจได้ทันที
-steps:
-  - name: test
-    image: golang:1.22-alpine
-    commands:
-      - go test ./...
+# Woodpecker (.woodpecker.yml) — ชัดเจน อ่านเข้าใจได้ทันที
+when:
+  event: push
+  branch: main
 
-  - name: build
+steps:
+  - name: test-backend
+    image: golang:1.25-alpine
+    commands:
+      - cd src/phase2-final/backend
+      - go mod download
+      - go vet ./...
+      - go test ./... -v -count=1
+
+  - name: build-push-core
     image: woodpeckerci/plugin-docker-buildx
     settings:
-      repo: myuser/myapp
-      tags: ["${CI_COMMIT_SHA:0:7}"]
+      repo: akawatmor/todoapp-core
+      tags: ["${CI_COMMIT_SHA:0:7}", "latest"]
+      username:
+        from_secret: DOCKER_USERNAME
+      password:
+        from_secret: DOCKER_PASSWORD
 ```
 
 ```groovy
@@ -143,7 +153,7 @@ pipeline {
 
 | ข้อจำกัด | วิธีรับมือ |
 |----------|-----------|
-| Plugin น้อยกว่า Jenkins | ใช้ Docker image โดยตรง (`image: aquasec/trivy`) |
+| Plugin น้อยกว่า Jenkins | ใช้ Docker image โดยตรง (`image: bitnami/kubectl`) |
 | ไม่มี built-in test report | Export JUnit XML → เก็บใน artifact |
 | Database เป็น SQLite (default) | เพียงพอสำหรับ self-hosted; upgrade เป็น PostgreSQL ได้ |
 | Parallel pipelines จำกัด | ตั้ง `WOODPECKER_MAX_PROCS` บน Agent |
@@ -222,64 +232,59 @@ MetalLB แก้ด้วย:
 - Node ที่ "เป็นเจ้าของ" IP จะรับ traffic ทั้งหมดก่อน แล้วกระจายต่อผ่าน kube-proxy
 - เหมาะกับ home lab / small cluster ที่ไม่มี BGP router
 
-### 3.4 PostgreSQL 16 บน iSCSI
+### 3.4 SQLite บน local-path PVC
 
-**บทบาท:** Relational database สำหรับ Todo application
+**บทบาท:** Embedded database สำหรับ Todo application (ไม่ต้องการ DB server แยก)
 
-**ทำไมใช้ PostgreSQL แทน MongoDB (Phase 1):**
+**ทำไมใช้ SQLite แทน MongoDB (Phase 1) / PostgreSQL:**
 
-| ด้าน | PostgreSQL 16 | MongoDB 4.4 |
-|------|:---:|:---:|
-| ACID transactions | ✅ | ⚠️ (4.x limited) |
-| Schema validation | ✅ Strict | ⚠️ Optional |
-| SQL ความสามารถ | ✅ เต็ม | ❌ NoSQL |
-| Performance (structured data) | ✅ ดีกว่า | ⚠️ ขึ้นกับ use case |
-| Resource usage (RAM) | ✅ ต่ำกว่า | ❌ สูงกว่า |
-| Go driver | `lib/pq` / `pgx` ดีมาก | `mongo-go-driver` |
+| ด้าน | SQLite (Phase 2) | MongoDB (Phase 1) | PostgreSQL |
+|------|:---:|:---:|:---:|
+| DB server แยก | ❌ ไม่ต้องมี | ✅ ต้องการ | ✅ ต้องการ |
+| RAM overhead | ~0 MB | ~256 MB | ~64 MB |
+| Setup | ไม่ต้อง setup | ต้องติดตั้ง + init | ต้องติดตั้ง + init |
+| Concurrent writes | ⚠️ Single writer | ✅ | ✅ |
+| เหมาะกับ | personal app, low traffic | high-write, distributed | structured, ACID |
 
-**ทำไม iSCSI แทน hostPath:**
+**ทำไม local-path PVC แทน hostPath:**
 ```
 hostPath:
-  ข้อมูลอยู่ที่ /var/lib/pg-data บน disk ของ VM1
-  → VM1 disk พัง → ข้อมูลหาย
-  → ไม่มี snapshot
+  ข้อมูลอยู่ที่ directory บน node ที่ pod รันอยู่
+  → pod schedule ไป node อื่น → ข้อมูลหาย
+  → ไม่มี StorageClass lifecycle management
 
-iSCSI → Synology NAS:
-  ข้อมูลอยู่บน NAS แยกต่างหาก (hardware RAID)
-  → VM1 พังทั้งเครื่อง → ข้อมูลยังอยู่บน NAS
-  → Synology DSM Snapshot: point-in-time recovery ทำได้ง่าย
-  → ขยาย storage ได้โดยไม่ต้อง resize VM disk
+local-path PVC (K3s built-in provisioner):
+  K3s สร้าง directory ให้อัตโนมัติ (/var/lib/rancher/k3s/...)
+  → PVC lifecycle ผูกกับ namespace/pod
+  → ลบ PVC → K3s ลบ data ให้อัตโนมัติ
+  → รองรับ ReadWriteOnce (SQLite ต้องการ single writer)
 ```
 
-**Jumbo Frame (MTU 9000) ช่วยอะไร:**
+**Strategy: Recreate แทน RollingUpdate:**
 ```
-iSCSI block transfer: 8 KB – 1 MB per request
+SQLite = single writer → PVC = ReadWriteOnce
+RollingUpdate จะมี 2 pods พยายาม mount PVC เดียวกัน → Error!
 
-MTU 1500 (standard):
-  8 KB ÷ 1472 bytes = ~6 packets per block
-  → 6× packet header overhead
-  → 6× interrupt handling
-
-MTU 9000 (jumbo frame):
-  8 KB ÷ 8972 bytes = ~1 packet per block
-  → CPU overhead ลดลง ~80%
-  → throughput เพิ่มขึ้น ~40% สำหรับ sequential I/O
+Recreate strategy:
+  T=0: ลบ pod เก่าก่อน (brief downtime ~5 วินาที)
+  T=1: สร้าง pod ใหม่ → mount PVC สำเร็จ
+  → ยอมรับ downtime สั้น ๆ เพื่อ data consistency
 ```
 
-### 3.5 Go 1.22 Backend
+### 3.5 Go 1.25 Backend
 
-**บทบาท:** REST API server สำหรับ Todo CRUD operations
+**บทบาท:** REST API server พร้อม GitHub OAuth, CalDAV sync, reminder system
 
 **ทำไมใช้ Go แทน Node.js (Phase 1):**
 
-| ด้าน | Go 1.22 | Node.js (Phase 1) |
+| ด้าน | Go 1.25 | Node.js (Phase 1) |
 |------|:---:|:---:|
-| Container size | ~10 MB (distroless) | ~200 MB (node:alpine) |
+| Container size | ~6 MB (distroless) | ~200 MB (node:alpine) |
 | Memory usage | ~20–30 MB idle | ~80–150 MB idle |
 | CPU (concurrent req) | ✅ goroutines (lightweight) | ⚠️ Event loop (single thread) |
 | Cold start | < 50 ms | ~300–500 ms |
 | Static binary | ✅ ไม่ต้อง runtime | ❌ ต้องการ Node runtime |
-| Built-in HTTP routing | ✅ Go 1.22 ServeMux | ❌ ต้องใช้ Express |
+| Built-in HTTP routing | ✅ Go 1.22+ ServeMux | ❌ ต้องใช้ Express |
 
 **ทำไมใช้ distroless image:**
 ```
@@ -296,7 +301,7 @@ distroless/static-debian12:nonroot:
   → CVE น้อยลง, attack surface เล็กที่สุด
 ```
 
-### 3.6 Next.js 15 Frontend
+### 3.6 Next.js 14 Frontend
 
 **บทบาท:** React-based frontend สำหรับ Todo UI
 
@@ -372,10 +377,11 @@ VM3 (k3s-ci)     — Dedicated CI node (tainted: dedicated=ci:NoSchedule)
 - Taint บังคับให้ App pods ไม่ไปรันบน VM3
 - CI Agent มี toleration → ไปรันบน VM3 ได้เท่านั้น
 
-**ทำไม App pods (backend/frontend) อยู่บน VM1 ไม่ใช่ VM2:**
-- PostgreSQL ต้อง nodeSelector: `role: main` เพราะ iSCSI login อยู่ที่ VM1 เท่านั้น
-- Backend/Frontend รันบน VM1 เพื่อ reduce network hop ไป PostgreSQL (same node)
-- VM2 ไว้รองรับ horizontal scale-out ถ้า backend ต้องการ replica เพิ่ม
+**ทำไม App pods schedule บน worker nodes (VM1 + VM2):**
+- `todoapp-core` มี `nodeAffinity: preferredDuringScheduling` → prefer worker nodes
+- `todoapp-web` มี `topologySpreadConstraints` → กระจาย 2 replicas ใน 2 nodes
+- SQLite PVC ใช้ `local-path` → K3s สร้าง data directory บน node ที่ core pod รันอยู่
+- VM3 taint `dedicated=ci:NoSchedule` → app pods ไม่ไปรันบน CI node
 
 ### 4.2 ทำไม Rolling Update (maxUnavailable=0)
 
@@ -444,7 +450,7 @@ Kubernetes backend:
   → rollback กลับไปเวอร์ชันอะไร?
 
 CI_COMMIT_SHA:
-  image: myuser/kps-backend:a1b2c3d   (unique ทุก commit)
+  image: akawatmor/todoapp-core:a1b2c3d   (unique ทุก commit)
   → K8s ต้อง pull เสมอ (tag ใหม่ = image ใหม่)
   → rollback: kubectl rollout undo → K8s จำ SHA เก่าได้
   → audit trail: ดูได้ว่า production รัน commit อะไร
@@ -459,10 +465,9 @@ CI_COMMIT_SHA:
 | สถานการณ์ | ตรวจพบอย่างไร | ผลกระทบ | วิธีแก้ไข | เวลา Recovery |
 |-----------|--------------|---------|-----------|--------------|
 | Backend pod crash | `kubectl get pods` แสดง CrashLoopBackOff | API ล่ม ชั่วคราว | K8s restart อัตโนมัติ / `kubectl rollout undo` | < 1 นาที |
-| Deploy ใหม่มี bug | Health check ล้มเหลวหลัง rolling update | API ช้า / error บางส่วน | `kubectl rollout undo deployment/backend -n app` | < 2 นาที |
-| PostgreSQL pod restart | Readiness probe fail | DB unavailable | K8s restart pod; ข้อมูลปลอดภัยบน iSCSI | 1–3 นาที |
-| iSCSI session หลุด | PVC ไม่ mount; pod ค้าง ContainerCreating | PostgreSQL ไม่ start | Login iSCSI ใหม่; restart open-iscsi | 5 นาที |
-| VM1 reboot | Cluster control plane ล่ม | ทุก service ล่ม | K3s auto-start หลัง boot; iSCSI login อัตโนมัติ | 3–5 นาที |
+| Deploy ใหม่มี bug | Health check `/healthz` ล้มเหลวหลัง deploy | API ล่มบางส่วน | `kubectl rollout undo deployment/todoapp-core -n todoapp` | < 2 นาที |
+| SQLite PVC corrupted | pod ไม่ start, log แสดง DB error | Backend ล่ม | restore จาก backup หรือ recreate PVC | 10 นาที |
+| VM1 reboot | Cluster control plane ล่ม | ทุก service ล่ม | K3s auto-start หลัง boot | 3–5 นาที |
 | Woodpecker pipeline fail | Discord notification + Woodpecker UI | Code ไม่ deploy | แก้ bug → push ใหม่; หรือ skip step ที่ fail | ขึ้นกับ bug |
 | Docker Hub rate limit | Build log: "toomanyrequests" | Pipeline ล้มเหลว | ใช้ `docker-password` ใน imagePullSecrets; retry | 10 นาที |
 | MetalLB IP ถูกชิง | Traefik ไม่ได้ IP | ทุก service ล่ม | ตรวจ ARP table; restart MetalLB speaker | 5 นาที |
@@ -472,59 +477,42 @@ CI_COMMIT_SHA:
 #### Layer 1: Application (K8s Rollback)
 ```bash
 # ดู history
-kubectl rollout history deployment/backend -n app
-# REVISION  CHANGE-CAUSE
-# 1         initial deploy
-# 2         feat: add todo filtering
-# 3         fix: db connection pool
+kubectl rollout history deployment/todoapp-core -n todoapp
+kubectl rollout history deployment/todoapp-web  -n todoapp
 
 # rollback ไป revision ก่อนหน้า
-kubectl rollout undo deployment/backend -n app
-
-# rollback ไป revision ที่ต้องการ
-kubectl rollout undo deployment/backend -n app --to-revision=2
+kubectl rollout undo deployment/todoapp-core -n todoapp
+kubectl rollout undo deployment/todoapp-web  -n todoapp
 
 # ตรวจสอบ
-kubectl rollout status deployment/backend -n app
+kubectl rollout status deployment/todoapp-core -n todoapp
 ```
 
-#### Layer 2: Database (PostgreSQL Recovery)
+#### Layer 2: Database (SQLite Recovery)
 ```bash
-# ── Option A: restore จาก pg_dump backup ──
-BACKUP_FILE="/opt/pg-backup/todoapp-20241227-020000.sql.gz"
-kubectl exec -n app deployment/postgresql -- \
-  bash -c "zcat | psql -U todouser -d todoapp" < $BACKUP_FILE
+# SQLite file อยู่ใน PVC ที่ /var/lib/todoapp/todoapp.db ใน pod
 
-# ── Option B: restore จาก Synology Snapshot ──
-# DSM → Storage Manager → LUN → pg-lun → Snapshot → เลือก snapshot → Restore
-# (ทำบน Synology DSM GUI, ไม่ต้องสั่ง command)
+# ── Option A: copy backup ออกมาก่อนที่ PVC จะเสีย ──
+kubectl exec -n todoapp deployment/todoapp-core -- \
+  cp /var/lib/todoapp/todoapp.db /tmp/todoapp.db.backup
+kubectl cp todoapp/<pod-name>:/tmp/todoapp.db.backup ./todoapp.db.backup
 
-# ── Option C: point-in-time recovery (ถ้า WAL archiving เปิดอยู่) ──
-# ซับซ้อนกว่า — ดู PostgreSQL WAL docs
+# ── Option B: restore กลับเข้าไป ──
+kubectl cp ./todoapp.db.backup todoapp/<pod-name>:/var/lib/todoapp/todoapp.db
+kubectl rollout restart deployment/todoapp-core -n todoapp
 ```
 
 #### Layer 3: Infrastructure (Node Recovery)
 ```bash
 # ── VM1 crash → reboot ──
 # K3s เริ่มอัตโนมัติหลัง boot (systemd unit)
-# iSCSI auto-login ตั้งไว้แล้ว (node.startup = automatic)
 # ตรวจสอบหลัง reboot:
 kubectl get nodes
-sudo iscsiadm -m session
-kubectl get pods -n app
+kubectl get pods -n todoapp
 
 # ── VM3 (CI) crash ──
 # ไม่กระทบ App — เฉพาะ pipeline ที่กำลังรันจะ fail
-# Woodpecker Agent restart เอง (Deployment replicas=2)
-
-# ── iSCSI session หลุด ──
-sudo iscsiadm -m node \
-  --targetname "iqn.2000-01.com.synology:PetchSynologyV2.default-target.98f26b345a8" \
-  --portal "192.168.111.10:3260" \
-  --login
-
-# restart PostgreSQL pod ให้ mount PVC ใหม่
-kubectl rollout restart deployment/postgresql -n app
+# Woodpecker Agent restart เอง (Deployment)
 ```
 
 ### 5.3 การ Debug Pipeline ที่ Fail
@@ -554,13 +542,13 @@ go test ./...
 ```bash
 # ── Cluster-level monitoring ──
 kubectl top nodes                           # CPU/RAM ของแต่ละ node
-kubectl top pods -n app                     # CPU/RAM ของแต่ละ pod
+kubectl top pods -n todoapp                 # CPU/RAM ของแต่ละ pod
 
 # ── ดู events ที่ผิดปกติ ──
 kubectl get events -A --field-selector type=Warning
 
 # ── ดู pod ที่ restart บ่อย ──
-kubectl get pods -n app -o wide | grep -v "0    "
+kubectl get pods -n todoapp -o wide
 
 # ── ตรวจ storage ──
 df -h                                       # disk บน VM1
@@ -575,14 +563,12 @@ kubectl get componentstatuses 2>/dev/null || \
 
 | มาตรการ | รายละเอียด | บังคับใน Pipeline |
 |---------|-----------|------------------|
-| Unit Tests | `go test ./...`, `tsc --noEmit` | ✅ step: test |
-| Security Scan | Trivy scan image ก่อน deploy | ✅ step: scan-vulnerabilities |
+| Unit Tests | `go test ./...` + `go vet` | ✅ step: test-backend |
 | Resource Limits | CPU/RAM limits บน K8s pods | ✅ ใน deployment YAML |
-| Readiness Probe | ไม่ส่ง traffic ไปยัง pod ที่ไม่พร้อม | ✅ ใน deployment YAML |
-| Immutable Tags | ใช้ commit SHA แทน `:latest` | ✅ step: build-push |
-| iSCSI auto-login | `node.startup = automatic` | ✅ ตั้งค่า iscsiadm |
-| pg_dump CronJob | backup ทุกคืน 02:00 | ✅ CronJob ใน Phase 7.9 |
-| Synology Snapshot | Storage-level backup | ✅ ตั้งบน DSM |
+| Readiness Probe | ไม่ส่ง traffic ไปยัง pod ที่ไม่พร้อม | ✅ `/readyz` endpoint |
+| Liveness Probe | restart pod ถ้า hang | ✅ `/healthz` endpoint |
+| Immutable Tags | ใช้ commit SHA แทน `:latest` | ✅ step: build-push-core/web |
+| SQLite backup | copy file ออกจาก PVC เป็นระยะ | ⚠️ manual หรือ CronJob |
 
 ---
 
@@ -667,44 +653,47 @@ Response กลับ User: < 100 ms (typical)
     │  • รับ task จาก Server
     │  • ใช้ K8s backend → สร้าง K8s Job/Pod สำหรับแต่ละ step
     │
-    │  ── Step 1: test ──────────────────────────────────────────
-    │  สร้าง K8s Pod: image=golang:1.22-bookworm
+    │  ── Step 1: test-backend ────────────────────────────────────
+    │  สร้าง K8s Pod: image=golang:1.25-alpine
     │  คำสั่ง:
-    │    cd backend
+    │    cd src/phase2-final/backend
     │    go mod download
-    │    go test ./... -v -race -coverprofile=coverage.out
-    │  ✅ PASS → ไปต่อ   ❌ FAIL → หยุด pipeline + notify Discord
+    │    go vet ./...
+    │    go test ./... -v -count=1
+    │  ✅ PASS → ไปต่อ   ❌ FAIL → หยุด pipeline + email notification
     │
-    │  ── Step 2: security-scan ──────────────────────────────────
-    │  สร้าง K8s Pod: image=securego/gosec:2.20.0
-    │  คำสั่ง: gosec -severity medium ./...
-    │  ✅ PASS → ไปต่อ   ❌ FAIL → หยุด pipeline
-    │
-    │  ── Step 3: build-push (backend) ──────────────────────────
+    │  ── Step 2: build-push-core (backend) ─────────────────────
     │  สร้าง K8s Pod: image=woodpeckerci/plugin-docker-buildx
     │  คำสั่ง:
-    │    docker buildx build backend/ → image: myuser/kps-backend:a1b2c3d
-    │    docker push myuser/kps-backend:a1b2c3d
-    │    docker push myuser/kps-backend:latest
+    │    docker buildx build src/phase2-final/backend/
+    │    → image: akawatmor/todoapp-core:a1b2c3d
+    │    → image: akawatmor/todoapp-core:latest
     │  ✅ PUSH สำเร็จ → Docker Hub
     │
-    │  ── Step 4: build-push (frontend) ─────────────────────────
+    │  ── Step 3: build-push-web (frontend) ─────────────────────
     │  สร้าง K8s Pod: image=woodpeckerci/plugin-docker-buildx
+    │  build_args: NEXT_PUBLIC_API_BASE_URL= (ว่าง = relative path)
     │  คำสั่ง:
-    │    docker buildx build frontend/ → image: myuser/kps-frontend:a1b2c3d
-    │    docker push myuser/kps-frontend:a1b2c3d
+    │    docker buildx build src/phase2-final/frontend/
+    │    → image: akawatmor/todoapp-web:a1b2c3d
+    │    → image: akawatmor/todoapp-web:latest
     │  ✅ PUSH สำเร็จ
     │
-    │  ── Step 5: deploy ─────────────────────────────────────────
-    │  สร้าง K8s Pod: image=bitnami/kubectl:latest
+    │  ── Step 4: deploy-k3s ─────────────────────────────────────
+    │  สร้าง K8s Pod: image=bitnami/kubectl:1.29
     │  คำสั่ง:
     │    echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
-    │    kubectl set image deployment/backend \
-    │      backend=myuser/kps-backend:a1b2c3d -n app
-    │    kubectl set image deployment/frontend \
-    │      frontend=myuser/kps-frontend:a1b2c3d -n app
-    │    kubectl rollout status deployment/backend -n app --timeout=180s
-    │    kubectl rollout status deployment/frontend -n app --timeout=180s
+    │    kubectl apply -f src/phase2-final/k8s/namespace.yaml
+    │    kubectl apply -f src/phase2-final/k8s/configmap.yaml
+    │    kubectl apply -f src/phase2-final/k8s/core-pvc.yaml
+    │    kubectl set image deployment/todoapp-core \
+    │      core=akawatmor/todoapp-core:a1b2c3d -n todoapp
+    │    kubectl set image deployment/todoapp-web \
+    │      web=akawatmor/todoapp-web:a1b2c3d -n todoapp
+    │    kubectl rollout status deployment/todoapp-core -n todoapp --timeout=180s
+    │    kubectl rollout status deployment/todoapp-web  -n todoapp --timeout=180s
+    │    kubectl run smoke-test-a1b2c3d --image=curlimages/curl --restart=Never \
+    │      --rm -i -n todoapp -- curl -sf http://todoapp-core:8080/healthz
     │
     ▼
 [K3s Cluster — Rolling Update]
@@ -719,14 +708,14 @@ Response กลับ User: < 100 ms (typical)
     │
     │  → User ไม่รู้สึก downtime ตลอดกระบวนการ
     ▼
-[Woodpecker Notification Step]
-    │  สร้าง K8s Pod: image=woodpeckerci/plugin-webhook
-    │  ส่ง Discord webhook:
-    │    ✅ "Deploy สำเร็จ! [repo] branch:main commit:a1b2c3d by [author]"
-    │    ❌ "Deploy ล้มเหลว! step:[ชื่อ step] branch:main commit:a1b2c3d"
+[Email Notification Step]
+    │  สร้าง K8s Pod: image=drillster/drone-email (หรือ woodpecker email plugin)
+    │  ส่ง Email ไปยังผู้รับที่กำหนด:
+    │    ✅ Subject: "[KPS] Deploy สำเร็จ — commit:a1b2c3d branch:main"
+    │    ❌ Subject: "[KPS] Pipeline FAILED — step:test-backend commit:a1b2c3d"
     ▼
-[Discord Channel]
-    • ทีมได้รับ notification
+[Email Inbox ของผู้รับ]
+    • ได้รับ notification ทันที
     • Pipeline สำเร็จใช้เวลา: ~5–8 นาที
 
 ทั้งหมดนี้เกิดขึ้นอัตโนมัติหลังจาก git push เพียงครั้งเดียว

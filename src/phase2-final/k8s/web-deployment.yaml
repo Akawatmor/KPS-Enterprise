@@ -27,12 +27,17 @@ spec:
               app: todoapp-web
       containers:
         - name: web
-          image: DOCKER_USERNAME/todoapp-web:latest
+          image: akawatmor/todoapp-web:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 3000
               name: http
           env:
+            - name: HOSTNAME
+              # Override K8s auto-injected HOSTNAME (pod name) so Next.js binds to 0.0.0.0.
+              value: "0.0.0.0"
+            - name: PORT
+              value: "3000"
             - name: NEXT_PUBLIC_API_BASE_URL
               # Requests go through Traefik ingress to the core service.
               value: ""

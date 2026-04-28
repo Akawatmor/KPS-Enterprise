@@ -1,10 +1,10 @@
 # 🚀 K3s Deploy + Woodpecker CI/CD Pipeline (Debian 13)
 
 ```
-Stack: Next.js 15 (Frontend) · Go 1.22 (Backend) · PostgreSQL 16 (DB)
+Stack: Next.js 14 (Frontend) · Go 1.25 (Backend) · SQLite (DB via PVC)
 OS:    Debian 13 (Trixie)
 CI/CD: Woodpecker CI
-Storage: iSCSI → Synology NAS
+Storage: local-path PVC (SQLite) — ไม่ใช้ iSCSI สำหรับ app นี้
 ```
 
 ---
@@ -1000,310 +1000,167 @@ EOF
 
 ```
 repo/                          ← root ของ repository
-├── .woodpecker/               ← pipeline files (root-level)
-│   ├── backend.yaml
-│   ├── frontend.yaml
-│   └── notify.yaml
-├── backend/
-│   ├── main.go
-│   ├── go.mod
-│   ├── go.sum
-│   └── Dockerfile
-└── frontend/
-    ├── app/
-    ├── Dockerfile
-    └── package.json
+├── .woodpecker.yml            ← Woodpecker pipeline (single file)
+└── src/phase2-final/
+    ├── backend/
+    │   ├── cmd/server/main.go
+    │   ├── internal/          ← handlers, config, models
+    │   ├── go.mod             ← module: github.com/KPS-Enterprise/todoapp/backend
+    │   ├── go.sum
+    │   └── Dockerfile
+    ├── frontend/
+    │   ├── app/               ← Next.js App Router (.js files)
+    │   ├── public/
+    │   ├── Dockerfile
+    │   ├── next.config.mjs
+    │   └── package.json
+    └── k8s/                   ← Kustomize manifests
+        ├── kustomization.yaml
+        ├── namespace.yaml
+        ├── configmap.yaml
+        ├── core-deployment.yaml
+        ├── web-deployment.yaml
+        └── ingress.yaml
 ```
 
-> **หมายเหตุ:** Pipeline files อยู่ที่ root `.woodpecker/` ไม่ได้อยู่ใน `backend/` เพื่อให้ Woodpecker discover ได้จาก repo root
+> **หมายเหตุ:** Backend ใช้ SQLite (ไม่ใช่ PostgreSQL) เก็บใน PVC ที่ `/var/lib/todoapp`
+> App มี GitHub OAuth login, CalDAV sync, และ reminder system (ซับซ้อนกว่า tutorial)
 
 ### 8.2 โค้ด Backend
 
-```go
-// main.go
-package main
+> **โค้ดจริงอยู่ที่:** `src/phase2-final/backend/`  
+> Entrypoint: `cmd/server/main.go` | Module: `github.com/KPS-Enterprise/todoapp/backend`
 
-import (
-	"database/sql"
-	"encoding/json"
-	"log"
-	"net/http"
-	"os"
-	"time"
+โครงสร้างหลักของ API:
 
-	_ "github.com/lib/pq"
-)
-
-var db *sql.DB
-
-type HealthResponse struct {
-	Status    string `json:"status"`
-	Timestamp string `json:"timestamp"`
-	Database  string `json:"database"`
-}
-
-type Todo struct {
-	ID        int       `json:"id"`
-	Title     string    `json:"title"`
-	Completed bool      `json:"completed"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-func main() {
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://todouser:password@localhost:5432/todoapp?sslmode=disable"
-	}
-
-	var err error
-	db, err = sql.Open("postgres", dbURL)
-	if err != nil {
-		log.Fatal("Failed to connect to database:", err)
-	}
-	defer db.Close()
-
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(10)
-	db.SetConnMaxLifetime(30 * time.Minute)
-
-	initDB()
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/health", healthHandler)
-	mux.HandleFunc("GET /api/todos", getTodosHandler)
-	mux.HandleFunc("POST /api/todos", createTodoHandler)
-	mux.HandleFunc("DELETE /api/todos/{id}", deleteTodoHandler)
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8000"
-	}
-
-	server := &http.Server{
-		Addr:         ":" + port,
-		Handler:      mux,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  120 * time.Second,
-	}
-
-	log.Printf("Backend starting on :%s", port)
-	log.Fatal(server.ListenAndServe())
-}
-
-func initDB() {
-	query := `CREATE TABLE IF NOT EXISTS todos (
-		id SERIAL PRIMARY KEY,
-		title TEXT NOT NULL,
-		completed BOOLEAN DEFAULT false,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);`
-	if _, err := db.Exec(query); err != nil {
-		log.Fatal("Failed to init database:", err)
-	}
-	log.Println("Database initialized")
-}
-
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	dbStatus := "connected"
-	if err := db.Ping(); err != nil {
-		dbStatus = "disconnected: " + err.Error()
-	}
-	json.NewEncoder(w).Encode(HealthResponse{
-		Status:    "ok",
-		Timestamp: time.Now().Format(time.RFC3339),
-		Database:  dbStatus,
-	})
-}
-
-func getTodosHandler(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query("SELECT id, title, completed, created_at FROM todos ORDER BY created_at DESC")
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	defer rows.Close()
-
-	todos := []Todo{}
-	for rows.Next() {
-		var t Todo
-		rows.Scan(&t.ID, &t.Title, &t.Completed, &t.CreatedAt)
-		todos = append(todos, t)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(todos)
-}
-
-func createTodoHandler(w http.ResponseWriter, r *http.Request) {
-	var t Todo
-	json.NewDecoder(r.Body).Decode(&t)
-	err := db.QueryRow(
-		"INSERT INTO todos (title, completed) VALUES ($1, $2) RETURNING id, created_at",
-		t.Title, t.Completed,
-	).Scan(&t.ID, &t.CreatedAt)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(t)
-}
-
-func deleteTodoHandler(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if _, err := db.Exec("DELETE FROM todos WHERE id = $1", id); err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
+```
+GET  /healthz              → liveness check
+GET  /readyz               → readiness check (DB ping)
+GET  /api/v1/tasks         → list tasks
+POST /api/v1/tasks         → create task
+PUT  /api/v1/tasks/{id}    → update task
+DELETE /api/v1/tasks/{id}  → delete task
+GET  /api/v1/auth/login    → GitHub OAuth redirect
+GET  /api/v1/auth/callback → GitHub OAuth callback
 ```
 
-```bash
-go get github.com/lib/pq
-go mod tidy
-```
+**Key env vars (จาก configmap.yaml + secret):**
 
-### 8.3 Dockerfile (Debian-friendly Multi-stage)
+| Variable | ค่า (default) |
+|---|---|
+| `SERVER_PORT` | `8080` |
+| `DATA_BACKEND` | `sqlite` |
+| `SQLITE_PATH` | `/var/lib/todoapp/todoapp.db` |
+| `ALLOWED_ORIGIN` | `https://todoapp-kps.akawatmor.com` |
+| `GITHUB_OAUTH_CLIENT_ID` | จาก secret |
+| `GITHUB_OAUTH_CLIENT_SECRET` | จาก secret |
+
+### 8.3 Dockerfile (Multi-stage)
 
 ```dockerfile
-# backend/Dockerfile
+# src/phase2-final/backend/Dockerfile
 
 # ── Stage 1: Build ──
-FROM golang:1.22-bookworm AS builder
+FROM golang:1.25-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -ldflags="-s -w -X main.version=$(git rev-parse --short HEAD 2>/dev/null || echo dev)" \
-    -o /server .
+    go build -trimpath -ldflags="-s -w" \
+    -o /out/todoapp-core ./cmd/server
 
-# ── Stage 2: Distroless (Debian base) ──
+# ── Stage 2: Distroless ──
 FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /server /server
-EXPOSE 8000
-ENTRYPOINT ["/server"]
+COPY --from=builder /out/todoapp-core /todoapp-core
+EXPOSE 8080
+ENTRYPOINT ["/todoapp-core"]
 ```
 
-> **ทำไม distroless?** เล็กกว่า `scratch` แต่มี CA certs และ user `nonroot` พร้อม
-> เหมาะกับ production บน Debian ecosystem
+> **ทำไม distroless?** เล็กมาก (~6 MB compressed) ไม่มี shell โจมตียาก
+> Binary อยู่ที่ `/todoapp-core` รันบน port **8080**
 
 ### 8.4 Build & Push (manual ครั้งแรก)
 
 ```bash
-cd ~/backend
+cd src/phase2-final
 
-docker build -t YOUR_DOCKERHUB/kps-backend:v1 .
-docker push YOUR_DOCKERHUB/kps-backend:v1
-docker tag YOUR_DOCKERHUB/kps-backend:v1 YOUR_DOCKERHUB/kps-backend:latest
-docker push YOUR_DOCKERHUB/kps-backend:latest
+docker build -t akawatmor/todoapp-core:latest ./backend/
+docker push akawatmor/todoapp-core:latest
 ```
+
+> Images ที่ push แล้ว: `akawatmor/todoapp-core:latest` (digest `sha256:9c98be1b...`, ~6 MB)
 
 ### 8.5 Deploy Backend
 
+> **ใช้ Kustomize** — ไม่ต้อง apply inline manifest ด้วยมือ manifest อยู่ใน `src/phase2-final/k8s/`
+
 ```bash
-cat << 'EOF' | kubectl apply -f -
+# สร้าง namespace + secret ก่อน
+kubectl create namespace todoapp
+kubectl create secret generic todoapp-secret \
+  --namespace todoapp \
+  --from-literal=GITHUB_OAUTH_CLIENT_ID=<GITHUB_CLIENT_ID> \
+  --from-literal=GITHUB_OAUTH_CLIENT_SECRET=<GITHUB_CLIENT_SECRET>
+
+# deploy ทุก resource ด้วย kustomize (namespace, configmap, pvc, deployment, service, ingress)
+kubectl apply -k src/phase2-final/k8s/
+```
+
+**core-deployment.yaml (อ้างอิง):**
+
+```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: backend
-  namespace: app
-  labels:
-    app: backend
-    version: "v1"
+  name: todoapp-core
+  namespace: todoapp
 spec:
-  replicas: 2
+  replicas: 1
+  strategy:
+    type: Recreate          # SQLite PVC เป็น ReadWriteOnce — ใช้ Recreate เท่านั้น
   selector:
     matchLabels:
-      app: backend
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0        # Zero-downtime deploy
+      app: todoapp-core
   template:
-    metadata:
-      labels:
-        app: backend
     spec:
-      nodeSelector:
-        role: main              # backend รันบน VM1 ร่วมกับ PostgreSQL (latency ต่ำสุด)
-      imagePullSecrets:
-      - name: dockerhub-cred
       containers:
-      - name: backend
-        image: YOUR_DOCKERHUB/kps-backend:latest
+      - name: core
+        image: akawatmor/todoapp-core:latest
         ports:
-        - containerPort: 8000
-        env:
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: pg-secret
-              key: url
-        - name: PORT
-          value: "8000"
-        - name: GOMAXPROCS
-          value: "2"
-        - name: GOMEMLIMIT
-          value: "200MiB"
-        resources:
-          requests:
-            cpu: 50m
-            memory: 32Mi
-          limits:
-            cpu: 500m
-            memory: 256Mi
+        - containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: todoapp-config
+        - secretRef:
+            name: todoapp-secret
+        volumeMounts:
+        - name: sqlite-data
+          mountPath: /var/lib/todoapp
         readinessProbe:
           httpGet:
-            path: /api/health
-            port: 8000
-          initialDelaySeconds: 2
-          periodSeconds: 5
-          failureThreshold: 3
+            path: /readyz
+            port: 8080
         livenessProbe:
           httpGet:
-            path: /api/health
-            port: 8000
-          initialDelaySeconds: 5
-          periodSeconds: 10
-        lifecycle:
-          preStop:
-            exec:
-              command: ["/bin/sh", "-c", "sleep 5"]   # Graceful drain
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: backend
-  namespace: app
-spec:
-  selector:
-    app: backend
-  ports:
-  - port: 8000
-    targetPort: 8000
-EOF
+            path: /healthz
+            port: 8080
 ```
 
 ### 8.6 Verify Backend
 
 ```bash
-kubectl get pods -n app -l app=backend
-kubectl rollout status deployment/backend -n app
+kubectl get pods -n todoapp -l app=todoapp-core
+kubectl rollout status deployment/todoapp-core -n todoapp
 
-kubectl port-forward -n app svc/backend 8000:8000 &
-curl http://localhost:8000/api/health
-# {"status":"ok","database":"connected"}
+kubectl port-forward -n todoapp svc/todoapp-core 8080:8080 &
+curl http://localhost:8080/healthz
+# {"status":"ok"}
+curl http://localhost:8080/readyz
+# {"status":"ok"}
 
-curl -X POST http://localhost:8000/api/todos \
-  -H "Content-Type: application/json" \
-  -d '{"title":"Test todo"}'
-
-curl http://localhost:8000/api/todos
+curl http://localhost:8080/api/v1/tasks
+# [] (empty list)
 kill %1
 ```
 
@@ -1311,47 +1168,48 @@ kill %1
 
 ## Phase 9: Next.js Frontend
 
-### 9.1 Dockerfile (Debian-optimized)
+### 9.1 Dockerfile
 
 ```dockerfile
-# frontend/Dockerfile
+# src/phase2-final/frontend/Dockerfile
 
-FROM node:20-bookworm-slim AS deps
+FROM node:20-alpine AS deps
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --only=production
+COPY package.json package-lock.json* ./
+RUN npm install --frozen-lockfile || npm install
 
-FROM node:20-bookworm-slim AS builder
+FROM node:20-alpine AS builder
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci
-COPY . .
+ARG NEXT_PUBLIC_API_BASE_URL=""
+ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
 ENV NEXT_TELEMETRY_DISABLED=1
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
 RUN npm run build
 
-FROM node:20-bookworm-slim AS runner
+FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN addgroup --system --gid 1001 nodejs && \
-    adduser  --system --uid 1001 nextjs
-
 COPY --from=builder /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
-USER nextjs
 EXPOSE 3000
 ENV PORT=3000 HOSTNAME="0.0.0.0"
 CMD ["node", "server.js"]
 ```
 
-### 9.2 next.config.ts
+> **สำคัญ**: `NEXT_PUBLIC_API_BASE_URL` ต้องถูก bake เข้า image ตอน **build** (ไม่ใช่ runtime)
+> เพราะ Next.js bundle ค่า `NEXT_PUBLIC_*` ไว้ใน JS bundle ตอน `npm run build`
+> ใน K3s ปล่อยเป็น `""` เพื่อให้ browser ใช้ relative path ผ่าน Ingress
 
-```typescript
-import type { NextConfig } from "next";
+### 9.2 next.config.mjs
 
-const nextConfig: NextConfig = {
+```javascript
+// next.config.mjs  (ไม่ใช่ .ts — project ใช้ JS ไม่ใช่ TS)
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   output: "standalone",
   poweredByHeader: false,
   compress: true,
@@ -1363,92 +1221,71 @@ export default nextConfig;
 ### 9.3 Build & Push
 
 ```bash
-cd ~/frontend
-docker build -t YOUR_DOCKERHUB/kps-frontend:v1 .
-docker push YOUR_DOCKERHUB/kps-frontend:v1
-docker tag YOUR_DOCKERHUB/kps-frontend:v1 YOUR_DOCKERHUB/kps-frontend:latest
-docker push YOUR_DOCKERHUB/kps-frontend:latest
+cd src/phase2-final
+
+docker build \
+  --build-arg NEXT_PUBLIC_API_BASE_URL="" \
+  -t akawatmor/todoapp-web:latest \
+  ./frontend/
+docker push akawatmor/todoapp-web:latest
 ```
+
+> Images ที่ push แล้ว: `akawatmor/todoapp-web:latest` (digest `sha256:ff8e9ce8...`, ~53 MB)
 
 ### 9.4 Deploy Frontend
 
-```bash
-cat << 'EOF' | kubectl apply -f -
+> **ใช้ Kustomize เช่นกัน** — `kubectl apply -k src/phase2-final/k8s/` deploy ทั้ง backend และ frontend พร้อมกัน
+
+**web-deployment.yaml (อ้างอิง):**
+
+```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: frontend
-  namespace: app
-  labels:
-    app: frontend
+  name: todoapp-web
+  namespace: todoapp
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
-      app: frontend
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+      app: todoapp-web
   template:
-    metadata:
-      labels:
-        app: frontend
     spec:
-      nodeSelector:
-        role: main              # frontend ติดตาม backend บน VM1 เพื่อลด hop
-      imagePullSecrets:
-      - name: dockerhub-cred
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: todoapp-web
       containers:
-      - name: frontend
-        image: YOUR_DOCKERHUB/kps-frontend:latest
+      - name: web
+        image: akawatmor/todoapp-web:latest
         ports:
         - containerPort: 3000
         env:
-        - name: NEXT_PUBLIC_API_URL
-          value: "https://todo.yourdomain.com/api"
-        resources:
-          requests:
-            cpu: 100m
-            memory: 128Mi
-          limits:
-            cpu: 500m
-            memory: 512Mi
+        - name: NEXT_PUBLIC_API_BASE_URL
+          value: ""             # ว่าง = ใช้ relative path ผ่าน Ingress
         readinessProbe:
           httpGet:
             path: /
             port: 3000
-          initialDelaySeconds: 5
-          periodSeconds: 10
+          initialDelaySeconds: 8
         livenessProbe:
           httpGet:
             path: /
             port: 3000
-          initialDelaySeconds: 10
-          periodSeconds: 15
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: frontend
-  namespace: app
-spec:
-  selector:
-    app: frontend
-  ports:
-  - port: 3000
-    targetPort: 3000
-EOF
+          initialDelaySeconds: 20
 ```
 
 ### 9.5 Verify Frontend
 
 ```bash
-kubectl get pods -n app -l app=frontend
+kubectl get pods -n todoapp -l app=todoapp-web
 
-kubectl port-forward -n app svc/frontend 3000:3000 &
-curl http://localhost:3000
+kubectl port-forward -n todoapp svc/todoapp-web 3000:3000 &
+curl -s http://localhost:3000 | head -5
+# <!DOCTYPE html>...
 kill %1
 ```
 

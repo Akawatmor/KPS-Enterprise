@@ -2,7 +2,7 @@
 
 > **สถานะ**: เปลี่ยนจาก AWS EKS → K3s Self-Hosted บน Proxmox VMs  
 > **CI/CD**: เปลี่ยนจาก Jenkins → Woodpecker CI  
-> **App**: Todo App (Node.js + React + MongoDB)
+> **App**: Todo App (Go + Next.js + SQLite)
 
 ---
 
@@ -12,8 +12,8 @@
 2. [สิ่งที่ต้องมีก่อนเริ่ม (Prerequisites)](#2-prerequisites)
 3. [Phase 1: OS + K3s Cluster Setup](#3-phase-1-os--k3s-cluster)
 4. [Phase 2: MetalLB + Traefik](#4-phase-2-metallb--traefik)
-5. [Phase 3: Deploy Application (MongoDB + Backend + Frontend)](#5-phase-3-deploy-application)
-6. [Phase 4: Traefik IngressRoute (Routing)](#6-phase-4-traefik-ingressroute)
+5. [Phase 3: Deploy Application (Backend + Frontend)](#5-phase-3-deploy-application)
+6. [Phase 4: Traefik Ingress (Routing)](#6-phase-4-traefik-ingress-routing)
 7. [Phase 5: Woodpecker CI/CD Setup](#7-phase-5-woodpecker-cicd)
 8. [Phase 6: Woodpecker Pipeline (.woodpecker.yml)](#8-phase-6-woodpecker-pipeline)
 9. [Phase 7: Nginx Reverse Proxy + Cloudflare](#9-phase-7-nginx--cloudflare)
@@ -41,9 +41,8 @@
 │  │  └── Woodpecker Server                                  │    │
 │  │                                                         │    │
 │  │  VM2 (kps-k3-w1-c1) — Worker (App)                      │    │
-│  │  ├── MongoDB (1 pod)                                    │    │
-│  │  ├── Backend - Node.js/Express (2 pods)                 │    │
-│  │  └── Frontend - React (1 pod)                           │    │
+│  │  ├── todoapp-core — Go/SQLite backend (1 pod)           │    │
+│  │  └── todoapp-web — Next.js frontend (2 pods)            │    │
 │  │                                                         │    │
 │  │  VM3 (kps-k3-w2-c1) — Worker (CI)                       │    │
 │  │  └── Woodpecker Agent (รัน CI pipeline)                 │    │
@@ -61,17 +60,18 @@
 | Load Balancer | AWS ALB | MetalLB (L2 mode) |
 | CI/CD | Jenkins on EC2 | Woodpecker CI on K3s |
 | Container Registry | Docker Hub | Docker Hub (เหมือนเดิม) |
-| Storage | hostPath | hostPath (เหมือนเดิม) |
-| Namespace | `three-tier` | `three-tier` (เหมือนเดิม) |
+| Storage | hostPath | local-path PVC (SQLite) |
+| Namespace | `three-tier` | `todoapp` |
 | DNS/SSL | - | Cloudflare + Nginx + TrueDDNS |
 
 ### App Info
 
 | Service | Port | Image |
 |---------|------|-------|
-| MongoDB | 27017 | `mongo:4.4.6` |
-| Backend (Express) | 3500 | `akawatmor/kps-backend` |
-| Frontend (React) | 3000 | `akawatmor/kps-frontend` |
+| Backend (Go) | 8080 | `akawatmor/todoapp-core:latest` |
+| Frontend (Next.js) | 3000 | `akawatmor/todoapp-web:latest` |
+
+> SQLite ถูกเก็บไว้ใน PVC ที่ mount ที่ `/var/lib/todoapp` บน todoapp-core pod
 
 ---
 
@@ -93,7 +93,7 @@
 
 ```
 VM1 (kps-k3-m-c1):   192.168.1.142 / 192.168.111.42   ← Master + Woodpecker Server
-VM2 (kps-k3-w1-c1):  192.168.1.143 / 192.168.111.43   ← Worker: App (MongoDB, Backend, Frontend) | label: role=app
+VM2 (kps-k3-w1-c1):  192.168.1.143 / 192.168.111.43   ← Worker: App (todoapp-core, todoapp-web) | label: role=app
 VM3 (kps-k3-w2-c1):  192.168.1.144 / 192.168.111.44   ← Worker: CI (Woodpecker Agent) | label: role=ci
 
 MetalLB Pool:      192.168.111.240-192.168.111.250  ← Link Local (L2 เดียวกับ Nginx 192.168.111.61)
@@ -290,390 +290,150 @@ EOF
 
 ## 5. Phase 3: Deploy Application
 
+> **⚠️ สำคัญ**: Phase 2 ใช้ application ใหม่ (`skoservice-datemaster`) ที่เขียนด้วย **Go + Next.js + SQLite**  
+> ไม่ใช่ Node.js + React + MongoDB เหมือน Phase 1 อีกต่อไป  
+> Manifests ทั้งหมดอยู่ใน `src/phase2-final/k8s/` ใช้ Kustomize deploy
+
 ### 5.1 สร้าง Namespace
 
 ```bash
-kubectl create namespace three-tier
+kubectl create namespace todoapp
 ```
 
-### 5.2 สร้าง Secrets
+### 5.2 สร้าง Secret
+
+App ต้องการ GitHub OAuth credentials สำหรับ authentication:
 
 ```bash
-# MongoDB credentials
-kubectl create secret generic mongo-sec \
-  --namespace three-tier \
-  --from-literal=username=admin \
-  --from-literal=password='password123'
-
-# (Optional) Docker Hub credentials ถ้าใช้ private image
-kubectl create secret docker-registry dockerhub-secret \
-  --namespace three-tier \
-  --docker-server=https://index.docker.io/v1/ \
-  --docker-username=akawatmor \
-  --docker-password='<DOCKER_HUB_TOKEN>' \
-  --docker-email=akawat.mor@dome.tu.ac.th
+kubectl create secret generic todoapp-secret \
+  --namespace todoapp \
+  --from-literal=GITHUB_OAUTH_CLIENT_ID=<GITHUB_CLIENT_ID> \
+  --from-literal=GITHUB_OAUTH_CLIENT_SECRET=<GITHUB_CLIENT_SECRET>
 ```
 
-### 5.3 สร้าง Data Directory (VM2 — kps-k3-w1-c1)
+> **หมายเหตุ**: สร้าง GitHub OAuth App ได้ที่ GitHub → Settings → Developer settings → OAuth Apps  
+> Callback URL: `https://todoapp-kps.akawatmor.com/api/v1/auth/callback`
 
-เนื่องจาก MongoDB จะ schedule บน `kps-k3-w1-c1` (role=app) ต้องสร้าง directory บน **VM2**:
+### 5.3 Deploy ด้วย Kustomize
+
+Manifests ทั้งหมดอยู่ใน `src/phase2-final/k8s/` รัน deploy ครั้งเดียว:
 
 ```bash
-# SSH เข้า VM2
-sudo mkdir -p /opt/mongo-data
-sudo chmod 777 /opt/mongo-data
+# clone repo ถ้ายังไม่มี
+git clone https://github.com/Akawatmor/KPS-Enterprise.git
+cd KPS-Enterprise
+
+# สร้าง namespace + secret ก่อน (ถ้ายังไม่ได้ทำ)
+kubectl create namespace todoapp
+kubectl create secret generic todoapp-secret \
+  --namespace todoapp \
+  --from-literal=GITHUB_OAUTH_CLIENT_ID=<GITHUB_CLIENT_ID> \
+  --from-literal=GITHUB_OAUTH_CLIENT_SECRET=<GITHUB_CLIENT_SECRET>
+
+# deploy ทุก resource ด้วย kustomize
+kubectl apply -k src/phase2-final/k8s/
 ```
 
-### 5.4 Deploy MongoDB
+> **⚠️ หมายเหตุ**: `kustomization.yaml` comment `secret.sample.yaml` ออกไว้แล้ว  
+> ต้องสร้าง secret ด้วยมือก่อน (step บนนี้) จึง apply kustomize ได้
+
+**Resources ที่จะถูกสร้าง:**
+
+| Resource | ชนิด | รายละเอียด |
+|---|---|---|
+| `todoapp` | Namespace | namespace หลักของ app |
+| `todoapp-config` | ConfigMap | env vars: SERVER_PORT, DATA_BACKEND, ALLOWED_ORIGIN ฯลฯ |
+| `todoapp-core` | Deployment (1 replica) | Go backend บน port 8080, mount SQLite PVC |
+| `todoapp-core-pvc` | PersistentVolumeClaim | 1Gi local-path สำหรับ SQLite database |
+| `todoapp-core` | Service (ClusterIP) | port 8080 |
+| `todoapp-web` | Deployment (2 replicas) | Next.js frontend บน port 3000 |
+| `todoapp-web` | Service (ClusterIP) | port 3000 |
+| `todoapp` | Ingress | route `/api` → core, `/` → web |
+
+### 5.4 ตรวจสอบ Pods
 
 ```bash
-cat << 'EOF' | kubectl apply -f -
----
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: mongo-pv
-  labels:
-    type: local
-spec:
-  capacity:
-    storage: 1Gi
-  accessModes:
-    - ReadWriteOnce
-  hostPath:
-    path: /opt/mongo-data
-    type: DirectoryOrCreate
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: mongo-volume-claim
-  namespace: three-tier
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 1Gi
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  namespace: three-tier
-  name: mongodb
-  labels:
-    app: mongodb
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: mongodb
-  template:
-    metadata:
-      labels:
-        app: mongodb
-    spec:
-      nodeSelector:
-        role: app
-      containers:
-      - name: mongodb
-        image: mongo:4.4.6
-        command:
-          - "numactl"
-          - "--interleave=all"
-          - "mongod"
-          - "--wiredTigerCacheSizeGB"
-          - "0.1"
-          - "--bind_ip"
-          - "0.0.0.0"
-        ports:
-        - containerPort: 27017
-        env:
-          - name: MONGO_INITDB_ROOT_USERNAME
-            valueFrom:
-              secretKeyRef:
-                name: mongo-sec
-                key: username
-          - name: MONGO_INITDB_ROOT_PASSWORD
-            valueFrom:
-              secretKeyRef:
-                name: mongo-sec
-                key: password
-        volumeMounts:
-          - name: mongo-volume
-            mountPath: /data/db
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "100m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
-      volumes:
-      - name: mongo-volume
-        persistentVolumeClaim:
-          claimName: mongo-volume-claim
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: mongodb-svc
-  namespace: three-tier
-spec:
-  selector:
-    app: mongodb
-  ports:
-  - port: 27017
-    targetPort: 27017
-  clusterIP: None
-EOF
-```
+kubectl get pods -n todoapp
+# NAME                            READY   STATUS    AGE
+# todoapp-core-xxxxxxxxxx-xxxxx   1/1     Running   1m
+# todoapp-web-xxxxxxxxxx-xxxxx    1/1     Running   1m
+# todoapp-web-xxxxxxxxxx-yyyyy    1/1     Running   1m
 
-**ตรวจสอบ:**
+# ดู logs backend
+kubectl logs -n todoapp -l app=todoapp-core --tail=20
 
-```bash
-kubectl get pods -n three-tier -l app=mongodb
-# NAME                       READY   STATUS    AGE
-# mongodb-xxxxxxxxxx-xxxxx   1/1     Running   30s
-
-# ทดสอบ connection
-kubectl exec -it -n three-tier deployment/mongodb -- \
-  mongo --username admin --password password123 --authenticationDatabase admin --eval "db.stats()"
-```
-
-### 5.5 Deploy Backend
-
-```bash
-cat << 'EOF' | kubectl apply -f -
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: api
-  namespace: three-tier
-  labels:
-    role: api
-spec:
-  replicas: 2
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 25%
-  selector:
-    matchLabels:
-      role: api
-  template:
-    metadata:
-      labels:
-        role: api
-    spec:
-      nodeSelector:
-        role: app
-      containers:
-      - name: api
-        image: akawatmor/kps-backend:latest
-        imagePullPolicy: Always
-        env:
-          - name: MONGO_CONN_STR
-            value: "mongodb://mongodb-svc:27017/todo?directConnection=true"
-          - name: USE_DB_AUTH
-            value: "true"
-          - name: MONGO_USERNAME
-            valueFrom:
-              secretKeyRef:
-                name: mongo-sec
-                key: username
-          - name: MONGO_PASSWORD
-            valueFrom:
-              secretKeyRef:
-                name: mongo-sec
-                key: password
-        ports:
-        - containerPort: 3500
-        livenessProbe:
-          httpGet:
-            path: /healthz
-            port: 3500
-          initialDelaySeconds: 5
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /ready
-            port: 3500
-          initialDelaySeconds: 3
-          periodSeconds: 5
-        resources:
-          requests:
-            cpu: 50m
-            memory: 64Mi
-          limits:
-            cpu: 300m
-            memory: 256Mi
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: api
-  namespace: three-tier
-spec:
-  selector:
-    role: api
-  ports:
-  - port: 3500
-    targetPort: 3500
-EOF
-```
-
-**ตรวจสอบ:**
-
-```bash
-kubectl get pods -n three-tier -l role=api
-# NAME                   READY   STATUS    AGE
-# api-xxxxxxxxxx-xxxxx   1/1     Running   30s
-# api-xxxxxxxxxx-yyyyy   1/1     Running   30s
-
-# ดู logs
-kubectl logs -n three-tier -l role=api --tail=20
-
-# ทดสอบ health
-kubectl port-forward -n three-tier svc/api 3500:3500 &
-curl http://localhost:3500/healthz
-# Healthy
-curl http://localhost:3500/ready
-# Ready
+# ทดสอบ health (port-forward)
+kubectl port-forward -n todoapp svc/todoapp-core 8080:8080 &
+curl http://localhost:8080/healthz
+# {"status":"ok"}
+curl http://localhost:8080/readyz
+# {"status":"ok"}
 kill %1
 ```
 
-### 5.6 Deploy Frontend
-
-```bash
-cat << 'EOF' | kubectl apply -f -
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: frontend
-  namespace: three-tier
-  labels:
-    role: frontend
-spec:
-  replicas: 1
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 25%
-  selector:
-    matchLabels:
-      role: frontend
-  template:
-    metadata:
-      labels:
-        role: frontend
-    spec:
-      nodeSelector:
-        role: app
-      containers:
-      - name: frontend
-        image: akawatmor/kps-frontend:latest
-        imagePullPolicy: Always
-        env:
-          - name: REACT_APP_BACKEND_URL
-            value: "https://todo.akawatmor.com/api/tasks"
-        ports:
-        - containerPort: 3000
-        resources:
-          requests:
-            cpu: 50m
-            memory: 64Mi
-          limits:
-            cpu: 300m
-            memory: 256Mi
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: frontend
-  namespace: three-tier
-spec:
-  selector:
-    role: frontend
-  ports:
-  - port: 3000
-    targetPort: 3000
-EOF
-```
-
-> **⚠️ สำคัญ**: `REACT_APP_BACKEND_URL` ต้องเป็น URL ที่ **browser** เข้าถึงได้ (ไม่ใช่ internal cluster URL)  
-> ถ้ายังไม่มี domain ใช้ `http://192.168.111.240/api/tasks` ไปก่อน
-
-**ตรวจสอบ:**
-
-```bash
-kubectl get pods -n three-tier -l role=frontend
-# NAME                        READY   STATUS    AGE
-# frontend-xxxxxxxxxx-xxxxx   1/1     Running   30s
-```
-
-### 5.7 สรุป Pods ที่ควรเห็น
-
-```bash
-kubectl get pods -n three-tier
-# NAME                        READY   STATUS    AGE
-# mongodb-xxx                 1/1     Running   5m
-# api-xxx                     1/1     Running   3m
-# api-yyy                     1/1     Running   3m
-# frontend-xxx                1/1     Running   1m
-```
-
 ---
 
-## 6. Phase 4: Traefik IngressRoute
+## 6. Phase 4: Traefik Ingress (Routing)
 
-### 6.1 สร้าง IngressRoute (แทน ALB Ingress)
+> K3s ใช้ **Traefik built-in** เป็น ingress controller  
+> เราใช้ standard Kubernetes `networking.k8s.io/v1` Ingress (ไม่ใช่ Traefik CRD IngressRoute)  
+> Ingress นี้ถูก include อยู่ใน `src/phase2-final/k8s/ingress.yaml` และถูก apply ไปแล้วใน step 5.3
 
-```bash
-cat << 'EOF' | kubectl apply -f -
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+### 6.1 Ingress ที่ได้ (อ้างอิงจาก src/phase2-final/k8s/ingress.yaml)
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
 metadata:
-  name: app-router
-  namespace: three-tier
+  name: todoapp
+  namespace: todoapp
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
 spec:
-  entryPoints:
-    - web
-  routes:
-    # Backend API — ทุก request ที่ขึ้นต้นด้วย /api
-    - match: Host(`todo.akawatmor.com`) && PathPrefix(`/api`)
-      kind: Rule
-      priority: 10
-      services:
-        - name: api
-          port: 3500
-
-    # Health check endpoints (สำหรับ monitoring)
-    - match: Host(`todo.akawatmor.com`) && (Path(`/healthz`) || Path(`/ready`) || Path(`/started`))
-      kind: Rule
-      priority: 20
-      services:
-        - name: api
-          port: 3500
-
-    # Frontend — ทุก request อื่นๆ
-    - match: Host(`todo.akawatmor.com`)
-      kind: Rule
-      priority: 1
-      services:
-        - name: frontend
-          port: 3000
-EOF
+  ingressClassName: traefik
+  rules:
+    - host: todoapp-kps.akawatmor.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: todoapp-core
+                port:
+                  number: 8080
+          - path: /healthz
+            pathType: Prefix
+            backend:
+              service:
+                name: todoapp-core
+                port:
+                  number: 8080
+          - path: /readyz
+            pathType: Prefix
+            backend:
+              service:
+                name: todoapp-core
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: todoapp-web
+                port:
+                  number: 3000
 ```
 
-### 6.2 ตรวจสอบ IngressRoute
+> **สำคัญ**: Backend routes ลงทะเบียนไว้ที่ `/api/v1/...` แล้ว  
+> **ไม่ต้อง** strip prefix — Traefik ส่ง path เต็มไปให้ todoapp-core ได้เลย
+
+### 6.2 ตรวจสอบ Ingress
 
 ```bash
-kubectl get ingressroute -n three-tier
-# NAME         AGE
-# app-router   10s
+kubectl get ingress -n todoapp
+# NAME       CLASS     HOSTS                          ADDRESS           PORTS   AGE
+# todoapp    traefik   todoapp-kps.akawatmor.com      192.168.111.240   80      1m
 ```
 
 ### 6.3 ทดสอบจาก LAN
@@ -681,14 +441,14 @@ kubectl get ingressroute -n three-tier
 ```bash
 # ทดสอบผ่าน MetalLB IP โดยส่ง Host header
 # (192.168.111.240 = MetalLB ที่ได้จาก Link Local Pool)
-curl -H "Host: todo.akawatmor.com" http://192.168.111.240/healthz
-# Healthy
+curl -H "Host: todoapp-kps.akawatmor.com" http://192.168.111.240/healthz
+# {"status":"ok"}
 
-curl -H "Host: todo.akawatmor.com" http://192.168.111.240/api/tasks
+curl -H "Host: todoapp-kps.akawatmor.com" http://192.168.111.240/api/v1/tasks
 # [] (หรือ list ของ tasks)
 
-curl -H "Host: todo.akawatmor.com" http://192.168.111.240/
-# HTML ของ React app
+curl -H "Host: todoapp-kps.akawatmor.com" http://192.168.111.240/
+# HTML ของ Next.js app
 ```
 
 ---
@@ -707,6 +467,7 @@ curl -H "Host: todo.akawatmor.com" http://192.168.111.240/
 3. จด `Client ID` และ `Client Secret` ไว้
 
 **7.1.2 สร้าง Namespace:**
+
 
 ```bash
 kubectl create namespace woodpecker
