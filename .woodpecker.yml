@@ -395,6 +395,7 @@ steps:
         from_secret: SMTP_USERNAME
       to:
         from_secret: NOTIFY_EMAIL
+      recipients_only: true
       subject: >-
         ✅ [KPS] Deploy สำเร็จ — ${CI_REPO_NAME}
         @ ${CI_COMMIT_BRANCH}:${CI_COMMIT_SHA:0:7}
