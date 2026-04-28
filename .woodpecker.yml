@@ -116,6 +116,7 @@ steps:
     privileged: true
     depends_on: [test-backend, security-scan-backend, dep-check-backend]
     when:
+      event: push
       branch: main
     settings:
       dockerfile: src/phase2-final/backend/Dockerfile
@@ -135,6 +136,7 @@ steps:
     privileged: true
     depends_on: [typecheck-frontend, test-frontend, dep-check-frontend]
     when:
+      event: push
       branch: main
     settings:
       dockerfile: src/phase2-final/frontend/Dockerfile
@@ -157,6 +159,7 @@ steps:
     image: aquasec/trivy:latest
     depends_on: [build-push-core]
     when:
+      event: push
       branch: main
     environment:
       DOCKER_USERNAME:
@@ -174,6 +177,7 @@ steps:
     image: aquasec/trivy:latest
     depends_on: [build-push-web]
     when:
+      event: push
       branch: main
     environment:
       DOCKER_USERNAME:
@@ -191,6 +195,7 @@ steps:
     image: patrickhulce/lhci:latest
     depends_on: [build-push-web]
     when:
+      event: push
       branch: main
     commands:
       - cd src/phase2-final/frontend
@@ -205,6 +210,7 @@ steps:
     image: bitnami/kubectl:1.29
     depends_on: [trivy-scan-core, trivy-scan-web, lighthouse]
     when:
+      event: push
       branch: main
     environment:
       KUBECONFIG_B64:
@@ -256,6 +262,7 @@ steps:
     image: bitnami/kubectl:1.29
     depends_on: [deploy-k3s]
     when:
+      event: push
       branch: main
     environment:
       KUBECONFIG_B64:
@@ -309,6 +316,7 @@ steps:
     image: drillster/drone-email
     depends_on: [smoke-test]
     when:
+      event: push
       branch: main
       status: [success]
     settings:
@@ -352,6 +360,7 @@ steps:
     image: drillster/drone-email
     depends_on: [smoke-test]
     when:
+      event: push
       branch: main
       status: [failure]
     settings:
