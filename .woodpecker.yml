@@ -23,7 +23,7 @@
 
 variables:
   # Image tags — pinned for reproducibility
-  - &go_image       "golang:1.24-bookworm"
+  - &go_image       "golang:1.25-bookworm"
   - &node_image     "node:22-bookworm-slim"
   - &kubectl_image  "bitnami/kubectl:1.31"
   - &trivy_image    "aquasec/trivy:0.62"
