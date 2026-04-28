@@ -72,7 +72,7 @@ steps:
 
   # ── 4. TypeScript type-check ─────────────────────────────────────────────
   - name: typecheck-frontend
-    image: node:20-bookworm-slim
+    image: node:22-bookworm-slim
     depends_on: []
     when:
       event: [push, pull_request]
@@ -80,10 +80,11 @@ steps:
     commands:
       - cd src/phase2-final/frontend
       - npm install
+      - npm run type-check
 
   # ── 5. Frontend unit tests ────────────────────────────────────────────────
   - name: test-frontend
-    image: node:20-bookworm-slim
+    image: node:22-bookworm-slim
     depends_on: []
     when:
       event: [push, pull_request]
@@ -95,7 +96,7 @@ steps:
 
   # ── 6. Frontend dependency audit (OWASP A06) ─────────────────────────────
   - name: dep-check-frontend
-    image: node:20-bookworm-slim
+    image: node:22-bookworm-slim
     depends_on: []
     when:
       branch: main
