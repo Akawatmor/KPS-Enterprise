@@ -1,0 +1,229 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Woodpecker CI/CD Pipeline — TodoApp Big Calendar (Phase 2)
+# Infrastructure: K3s 3-node (1 master + 2 workers) · Docker Hub · Woodpecker
+#
+# App source: src/phase2-final/
+#
+# Branch strategy:
+#   develop → quality gates only (tests, typecheck, static analysis)
+#   main    → quality gates + build + push + trivy scan + deploy
+#
+# Required Woodpecker secrets:
+#   DOCKER_USERNAME   — Docker Hub username
+#   DOCKER_PASSWORD   — Docker Hub access token
+#   KUBECONFIG_B64    — base64-encoded kubeconfig pointing at K3s master
+# ─────────────────────────────────────────────────────────────────────────────
+
+when:
+  event: push
+  branch:
+    - main
+    - develop
+
+steps:
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # BACKEND — quality gates (develop + main)
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── 1. Unit tests + race detector + coverage ─────────────────────────────
+  - name: test-backend
+    image: golang:1.22-bookworm
+    when:
+      branch: [main, develop]
+    commands:
+      - cd src/phase2-final/backend
+      - go mod download
+      - go vet ./...
+      - go test ./... -v -race -count=1 -coverprofile=coverage.out
+      - go tool cover -func=coverage.out | tail -1
+
+  # ── 2. Static security analysis (gosec — OWASP-aligned) ──────────────────
+  - name: security-scan-backend
+    image: securego/gosec:2.20.0
+    when:
+      branch: main
+    commands:
+      - cd src/phase2-final/backend
+      - gosec -severity medium -confidence medium -fmt=text ./...
+
+  # ── 3. Dependency vulnerability check (govulncheck — OWASP A06) ──────────
+  - name: dep-check-backend
+    image: golang:1.22-bookworm
+    when:
+      branch: main
+    commands:
+      - go install golang.org/x/vuln/cmd/govulncheck@latest
+      - cd src/phase2-final/backend
+      - govulncheck ./...
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # FRONTEND — quality gates (develop + main)
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── 4. TypeScript type-check ─────────────────────────────────────────────
+  - name: typecheck-frontend
+    image: node:20-bookworm-slim
+    when:
+      branch: [main, develop]
+    commands:
+      - cd src/phase2-final/frontend
+      - npm ci
+      - npx tsc --noEmit
+
+  # ── 5. Frontend unit tests ────────────────────────────────────────────────
+  - name: test-frontend
+    image: node:20-bookworm-slim
+    when:
+      branch: [main, develop]
+    commands:
+      - cd src/phase2-final/frontend
+      - npm ci
+      - npm test -- --passWithNoTests
+
+  # ── 6. Frontend dependency audit (OWASP A06) ─────────────────────────────
+  - name: dep-check-frontend
+    image: node:20-bookworm-slim
+    when:
+      branch: main
+    commands:
+      - cd src/phase2-final/frontend
+      - npm ci
+      # Fail on high/critical vulnerabilities
+      - npm audit --audit-level=high
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # BUILD & PUSH — main only
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── 7. Build & push backend image ────────────────────────────────────────
+  - name: build-push-core
+    image: woodpeckerci/plugin-docker-buildx
+    privileged: true
+    when:
+      branch: main
+    settings:
+      dockerfile: src/phase2-final/backend/Dockerfile
+      context: src/phase2-final/backend
+      repo: YOURDOCKERHUB/todoapp-core
+      tags:
+        - "${CI_COMMIT_SHA:0:7}"
+        - latest
+      username:
+        from_secret: DOCKER_USERNAME
+      password:
+        from_secret: DOCKER_PASSWORD
+
+  # ── 8. Build & push frontend image ───────────────────────────────────────
+  - name: build-push-web
+    image: woodpeckerci/plugin-docker-buildx
+    privileged: true
+    when:
+      branch: main
+    settings:
+      dockerfile: src/phase2-final/frontend/Dockerfile
+      context: src/phase2-final/frontend
+      repo: YOURDOCKERHUB/todoapp-web
+      tags:
+        - "${CI_COMMIT_SHA:0:7}"
+        - latest
+      username:
+        from_secret: DOCKER_USERNAME
+      password:
+        from_secret: DOCKER_PASSWORD
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # IMAGE VULNERABILITY SCAN (Trivy) — main only, after push
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── 9. Trivy — scan backend image (HIGH + CRITICAL, unfixed only) ─────────
+  - name: trivy-scan-core
+    image: aquasec/trivy:latest
+    when:
+      branch: main
+    environment:
+      DOCKER_USERNAME:
+        from_secret: DOCKER_USERNAME
+    commands:
+      - >
+        trivy image
+        --exit-code 1
+        --severity HIGH,CRITICAL
+        --ignore-unfixed
+        ${DOCKER_USERNAME}/todoapp-core:${CI_COMMIT_SHA:0:7}
+
+  # ── 10. Trivy — scan frontend image ──────────────────────────────────────
+  - name: trivy-scan-web
+    image: aquasec/trivy:latest
+    when:
+      branch: main
+    environment:
+      DOCKER_USERNAME:
+        from_secret: DOCKER_USERNAME
+    commands:
+      - >
+        trivy image
+        --exit-code 1
+        --severity HIGH,CRITICAL
+        --ignore-unfixed
+        ${DOCKER_USERNAME}/todoapp-web:${CI_COMMIT_SHA:0:7}
+
+  # ── 11. Lighthouse CI (performance / accessibility audit) ────────────────
+  - name: lighthouse
+    image: patrickhulce/lhci:latest
+    when:
+      branch: main
+    commands:
+      - cd src/phase2-final/frontend
+      - lhci autorun --upload.target=temporary-public-storage || true
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # DEPLOY — main only
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ── 12. Deploy to K3s via kubectl ────────────────────────────────────────
+  - name: deploy-k3s
+    image: bitnami/kubectl:1.29
+    when:
+      branch: main
+    environment:
+      KUBECONFIG_B64:
+        from_secret: KUBECONFIG_B64
+      DOCKER_USERNAME:
+        from_secret: DOCKER_USERNAME
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - kubectl cluster-info
+
+      # Apply namespace, configmap, PVC, services, ingress (idempotent)
+      - kubectl apply -f src/phase2-final/k8s/namespace.yaml
+      - kubectl apply -f src/phase2-final/k8s/configmap.yaml
+      - kubectl apply -f src/phase2-final/k8s/core-pvc.yaml
+      - kubectl apply -f src/phase2-final/k8s/core-service.yaml
+      - kubectl apply -f src/phase2-final/k8s/web-service.yaml
+      - kubectl apply -f src/phase2-final/k8s/ingress.yaml
+
+      - >
+        kubectl set image deployment/todoapp-core
+        core=${DOCKER_USERNAME}/todoapp-core:${CI_COMMIT_SHA:0:7}
+        -n todoapp
+      - >
+        kubectl set image deployment/todoapp-web
+        web=${DOCKER_USERNAME}/todoapp-web:${CI_COMMIT_SHA:0:7}
+        -n todoapp
+
+      - kubectl rollout status deployment/todoapp-core -n todoapp --timeout=180s
+      - kubectl rollout status deployment/todoapp-web  -n todoapp --timeout=180s
+
+      # Smoke test
+      - >
+        kubectl run smoke-${CI_COMMIT_SHA:0:7}
+        --image=curlimages/curl:8.7.1
+        --restart=Never
+        --rm
+        -i
+        -n todoapp
+        -- curl -sf http://todoapp-core:8080/healthz
+
+      - rm -f /tmp/kubeconfig

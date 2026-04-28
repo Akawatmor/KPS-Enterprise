@@ -1,0 +1,32 @@
+# EKS Cluster Configuration for AWS Learner Lab
+# Uses pre-existing LabEksClusterRole and LabEksNodeRole
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: kps-three-tier-cluster
+  region: us-east-1
+  version: "1.30"
+
+iam:
+  serviceRoleARN: arn:aws:iam::533267353075:role/c197601a5059488l14479765t1w533267-LabEksClusterRole-y5d5vJ2AOQhX
+
+managedNodeGroups:
+  - name: kps-nodegroup
+    instanceType: t3.large
+    desiredCapacity: 3
+    minSize: 2
+    maxSize: 4
+    volumeSize: 30
+    iam:
+      instanceRoleARN: arn:aws:iam::533267353075:role/c197601a5059488l14479765t1w533267353-LabEksNodeRole-35zcJQVl9OJZ
+    labels:
+      role: worker
+      project: kps-enterprise
+    tags:
+      Environment: demo
+      Project: KPS-Enterprise
+
+cloudWatch:
+  clusterLogging:
+    enableTypes: ["api", "audit", "authenticator"]

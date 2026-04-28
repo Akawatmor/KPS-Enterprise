@@ -1,0 +1,23 @@
+# KPS-Enterprise Prerequisites Information
+# Generated: Wed Apr  1 03:40:41 PM UTC 2026
+
+AWS_ACCOUNT_ID=533267353075
+AWS_REGION=us-east-1
+
+# SSH Key Pair
+KEY_PAIR_NAME=kps-jenkins-key
+KEY_PAIR_FILE=/home/skoadmin/.ssh/kps-jenkins-key.pem
+
+# S3 Bucket (Terraform State)
+S3_BUCKET_NAME=kps-terraform-state-533267353075
+
+# DynamoDB Table (Terraform State Lock)
+DYNAMODB_TABLE_NAME=kps-terraform-lock
+
+# SSH Command (after EC2 created)
+ssh -i /home/skoadmin/.ssh/kps-jenkins-key.pem ubuntu@<EC2_PUBLIC_IP>
+
+# Clean up commands (if needed)
+# aws ec2 delete-key-pair --key-name kps-jenkins-key --region us-east-1
+# aws s3 rb s3://kps-terraform-state-533267353075 --force --region us-east-1
+# aws dynamodb delete-table --table-name kps-terraform-lock --region us-east-1

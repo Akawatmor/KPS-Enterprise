@@ -1,0 +1,12 @@
+# KPS-Enterprise Docker Images
+# Generated: Wed Apr  1 06:35:24 PM UTC 2026
+
+DOCKERHUB_USER=akawatmor
+IMAGE_TAG=v1.0
+
+BACKEND_IMAGE=akawatmor/kps-backend:v1.0
+FRONTEND_IMAGE=akawatmor/kps-frontend:v1.0
+
+# Pull images
+docker pull akawatmor/kps-backend:v1.0
+docker pull akawatmor/kps-frontend:v1.0

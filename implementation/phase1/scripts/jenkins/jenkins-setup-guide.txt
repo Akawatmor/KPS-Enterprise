@@ -1,0 +1,33 @@
+# KPS-Enterprise Jenkins Setup Guide
+# Generated: Wed Apr  1 04:54:54 PM UTC 2026
+
+JENKINS_URL=http://[33m╷[0m[0m:8080
+SONAR_URL=http://[33m╷[0m[0m:9000
+
+# Initial Admin Password
+ssh -i ~/.ssh/<key>.pem ubuntu@[33m╷[0m[0m
+sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+
+# Required Plugins
+- Docker, Docker Pipeline
+- Kubernetes CLI, Kubernetes
+- SonarQube Scanner
+- OWASP Dependency-Check
+- NodeJS
+
+# Required Credentials
+- github-token (Secret text)
+- GITHUB (Username with password)
+- dockerhub-credentials (Username with password)
+- sonar-token (Secret text)
+
+# Tool Configurations
+- jdk (OpenJDK 17)
+- nodejs (NodeJS 18.x)
+- sonar-scanner (SonarQube Scanner)
+- DP-Check (OWASP Dependency-Check)
+
+# SonarQube Server Config
+Name: sonar-server
+URL: http://localhost:9000
+Token: sonar-token

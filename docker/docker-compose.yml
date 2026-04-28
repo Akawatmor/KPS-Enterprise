@@ -1,0 +1,47 @@
+services:
+  mongodb:
+    image: mongo:4.4.6
+    container_name: issue7-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongo", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  backend:
+    build:
+      context: ./backend
+    container_name: issue7-backend
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      MONGO_CONN_STR: mongodb://mongodb:27017/taskdb
+      USE_DB_AUTH: "false"
+      PORT: 3500
+    ports:
+      - "3500:3500"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: issue7-frontend
+    depends_on:
+      - backend
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      REACT_APP_BACKEND_URL: http://localhost:3500/api/tasks
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  mongodb-data:

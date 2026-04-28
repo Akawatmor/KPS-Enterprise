@@ -1,0 +1,15 @@
+# KPS-Enterprise EKS Cluster Info
+# Generated: Wed Apr  1 04:51:20 PM UTC 2026
+
+CLUSTER_NAME=kps-three-tier-cluster
+REGION=us-east-1
+K8S_VERSION=1.30
+NODE_TYPE=t3.large
+NODE_COUNT=3
+
+# Update kubeconfig
+aws eks update-kubeconfig --name kps-three-tier-cluster --region us-east-1
+
+# Get cluster info
+kubectl cluster-info
+kubectl get nodes

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: todoapp-config
+  namespace: todoapp
+data:
+  SERVER_PORT: "8080"
+  DATA_BACKEND: "postgres"
+  NAGGER_TICK_SECONDS: "30"
+  CALDAV_TICK_SECONDS: "60"
+  AUTH_ACCESS_TOKEN_MINUTES: "15"
+  AUTH_REFRESH_TOKEN_MINUTES: "10080"
+  # ALLOWED_ORIGIN must match the frontend domain for CORS.
+  ALLOWED_ORIGIN: "https://todoapp-kps.akawatmor.com"
