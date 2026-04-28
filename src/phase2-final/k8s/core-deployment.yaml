@@ -9,10 +9,12 @@ metadata:
     app: todoapp-core
     app.kubernetes.io/part-of: todoapp
 spec:
-  replicas: 1
+  replicas: 2
   strategy:
-    # Recreate: required because SQLite PVC is ReadWriteOnce.
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: todoapp-core
@@ -44,9 +46,6 @@ spec:
                 name: todoapp-config
             - secretRef:
                 name: todoapp-secret
-          volumeMounts:
-            - name: sqlite-data
-              mountPath: /var/lib/todoapp
           readinessProbe:
             httpGet:
               path: /readyz
@@ -73,7 +72,4 @@ spec:
             readOnlyRootFilesystem: false
             runAsNonRoot: true
             runAsUser: 65532
-      volumes:
-        - name: sqlite-data
-          persistentVolumeClaim:
-            claimName: todoapp-sqlite-pvc
+      # No volumes — data lives in PostgreSQL (todoapp-postgres StatefulSet)

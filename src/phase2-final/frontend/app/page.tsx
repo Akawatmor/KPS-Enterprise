@@ -4,28 +4,90 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   addDays, isSameMonth, isSameDay, isToday, addMonths, subMonths,
-  parseISO, startOfDay, endOfDay, formatISO,
+  parseISO, startOfDay,
 } from "date-fns";
-import { th } from "date-fns/locale";
 import {
   ChevronLeft, ChevronRight, Plus, X, Check, Pencil, Trash2,
   Calendar, Clock, Flag, AlignLeft, CheckSquare2,
 } from "lucide-react";
 import { fetchAPI } from "./modules/api";
 
+// ── Domain Types ──────────────────────────────────────────────────────────────
+type Priority = "high" | "normal" | "low";
+
+interface Task {
+  id: number;
+  title: string;
+  description?: string;
+  priority: Priority;
+  due_at: string;       // ISO 8601 string from backend
+  status: "open" | "done";
+  created_at?: string;
+  updated_at?: string;
+  completed_at?: string | null;
+}
+
+interface PriorityConfig {
+  value: Priority;
+  label: string;
+  cls: string;
+}
+
+interface TaskModalProps {
+  defaultDate: Date | null;
+  editTask: Task | null;
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+interface TaskCardProps {
+  task: Task;
+  onToggle: (task: Task) => void;
+  onEdit: (task: Task) => void;
+  onDelete: (task: Task) => void;
+}
+
+interface DayCellProps {
+  date: Date;
+  currentMonth: Date;
+  tasks: Task[];
+  selected: Date | null;
+  onClick: (date: Date) => void;
+}
+
+interface DayPanelProps {
+  date: Date | null;
+  tasks: Task[];
+  onClose: () => void;
+  onAddTask: () => void;
+  onToggle: (task: Task) => void;
+  onEdit: (task: Task) => void;
+  onDelete: (task: Task) => void;
+}
+
+interface ModalState {
+  mode: "add" | "edit";
+  task?: Task;
+  date?: Date;
+}
+
+interface TasksResponse {
+  items?: Array<{ task?: Task } | Task>;
+}
+
 // ── Constants ──────────────────────────────────────────────────────────────────
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const PRIORITIES = [
+const WEEKDAYS: string[] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const PRIORITIES: PriorityConfig[] = [
   { value: "high",   label: "🔴 High",   cls: "badge-high" },
   { value: "normal", label: "🔵 Normal", cls: "badge-normal" },
   { value: "low",    label: "🟣 Low",    cls: "badge-low" },
 ];
 
 // ── Helper: build calendar grid days ─────────────────────────────────────────
-function buildCalendarDays(monthDate) {
+function buildCalendarDays(monthDate: Date): Date[] {
   const start = startOfWeek(startOfMonth(monthDate), { weekStartsOn: 0 });
   const end   = endOfWeek(endOfMonth(monthDate), { weekStartsOn: 0 });
-  const days  = [];
+  const days: Date[] = [];
   let cur = start;
   while (cur <= end) {
     days.push(cur);
@@ -35,24 +97,24 @@ function buildCalendarDays(monthDate) {
 }
 
 // ── Task Modal ────────────────────────────────────────────────────────────────
-function TaskModal({ defaultDate, editTask, onClose, onSaved }) {
+function TaskModal({ defaultDate, editTask, onClose, onSaved }: TaskModalProps): React.JSX.Element {
   const isEdit = !!editTask;
   const defaultDue = defaultDate
     ? format(defaultDate, "yyyy-MM-dd") + "T09:00"
     : format(new Date(), "yyyy-MM-dd") + "T09:00";
 
-  const [title, setTitle]   = useState(isEdit ? editTask.title : "");
-  const [desc, setDesc]     = useState(isEdit ? (editTask.description || "") : "");
-  const [priority, setPri]  = useState(isEdit ? (editTask.priority || "normal") : "normal");
-  const [dueAt, setDueAt]   = useState(
+  const [title, setTitle]   = useState<string>(isEdit ? editTask.title : "");
+  const [desc, setDesc]     = useState<string>(isEdit ? (editTask.description ?? "") : "");
+  const [priority, setPri]  = useState<Priority>(isEdit ? (editTask.priority ?? "normal") : "normal");
+  const [dueAt, setDueAt]   = useState<string>(
     isEdit && editTask.due_at
       ? format(parseISO(editTask.due_at), "yyyy-MM-dd'T'HH:mm")
       : defaultDue
   );
-  const [saving, setSaving] = useState(false);
-  const [error, setError]   = useState("");
+  const [saving, setSaving] = useState<boolean>(false);
+  const [error, setError]   = useState<string>("");
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     if (!title.trim()) { setError("Title is required"); return; }
     setSaving(true);
@@ -71,25 +133,25 @@ function TaskModal({ defaultDate, editTask, onClose, onSaved }) {
       }
       onSaved();
     } catch (err) {
-      setError(err.message);
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async () => {
+  const handleDelete = async (): Promise<void> => {
     if (!confirm("Delete this todo?")) return;
     try {
-      await fetchAPI(`/tasks/${editTask.id}`, { method: "DELETE" });
+      await fetchAPI(`/tasks/${editTask!.id}`, { method: "DELETE" });
       onSaved();
     } catch (err) {
-      setError(err.message);
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-card" onClick={(e: React.MouseEvent<HTMLDivElement>) => e.stopPropagation()}>
         <div className="modal-header">
           <span className="modal-title">{isEdit ? "Edit Todo" : "New Todo"}</span>
           <button className="btn-icon" onClick={onClose}><X size={18} /></button>
@@ -105,7 +167,7 @@ function TaskModal({ defaultDate, editTask, onClose, onSaved }) {
             <input
               className="field-input"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTitle(e.target.value)}
               placeholder="What needs to be done?"
               autoFocus
             />
@@ -121,7 +183,7 @@ function TaskModal({ defaultDate, editTask, onClose, onSaved }) {
                 className="field-input"
                 type="datetime-local"
                 value={dueAt}
-                onChange={(e) => setDueAt(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDueAt(e.target.value)}
               />
             </div>
             <div className="field-group">
@@ -132,7 +194,7 @@ function TaskModal({ defaultDate, editTask, onClose, onSaved }) {
               <select
                 className="field-input select-styled"
                 value={priority}
-                onChange={(e) => setPri(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setPri(e.target.value as Priority)}
               >
                 {PRIORITIES.map((p) => (
                   <option key={p.value} value={p.value}>{p.label}</option>
@@ -149,7 +211,7 @@ function TaskModal({ defaultDate, editTask, onClose, onSaved }) {
             <textarea
               className="field-input"
               value={desc}
-              onChange={(e) => setDesc(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDesc(e.target.value)}
               placeholder="Add details, notes, or links…"
               rows={3}
             />
@@ -173,9 +235,9 @@ function TaskModal({ defaultDate, editTask, onClose, onSaved }) {
 }
 
 // ── Task Card ─────────────────────────────────────────────────────────────────
-function TaskCard({ task, onToggle, onEdit, onDelete }) {
+function TaskCard({ task, onToggle, onEdit, onDelete }: TaskCardProps): React.JSX.Element {
   const isDone = task.status === "done";
-  const pri    = PRIORITIES.find((p) => p.value === (task.priority || "normal"));
+  const pri    = PRIORITIES.find((p) => p.value === (task.priority ?? "normal"));
 
   return (
     <div className={`task-card ${isDone ? "done-card" : ""}`}>
@@ -199,8 +261,8 @@ function TaskCard({ task, onToggle, onEdit, onDelete }) {
                 {format(parseISO(task.due_at), "HH:mm")}
               </span>
             )}
-            <span className={`task-badge ${pri?.cls || "badge-normal"}`}>
-              {task.priority || "normal"}
+            <span className={`task-badge ${pri?.cls ?? "badge-normal"}`}>
+              {task.priority ?? "normal"}
             </span>
             <span className={`task-badge ${isDone ? "badge-done" : "badge-open"}`}>
               {isDone ? "done" : "open"}
@@ -221,10 +283,10 @@ function TaskCard({ task, onToggle, onEdit, onDelete }) {
 }
 
 // ── Day Cell ──────────────────────────────────────────────────────────────────
-function DayCell({ date, currentMonth, tasks, selected, onClick }) {
+function DayCell({ date, currentMonth, tasks, selected, onClick }: DayCellProps): React.JSX.Element {
   const isCurrentMonth = isSameMonth(date, currentMonth);
   const isT  = isToday(date);
-  const isSel = selected && isSameDay(date, selected);
+  const isSel = selected !== null && isSameDay(date, selected);
   const MAX_PILLS = 3;
 
   const visibleTasks = tasks.slice(0, MAX_PILLS);
@@ -268,7 +330,7 @@ function DayCell({ date, currentMonth, tasks, selected, onClick }) {
 }
 
 // ── Day Panel ─────────────────────────────────────────────────────────────────
-function DayPanel({ date, tasks, onClose, onAddTask, onToggle, onEdit, onDelete }) {
+function DayPanel({ date, tasks, onClose, onAddTask, onToggle, onEdit, onDelete }: DayPanelProps): React.JSX.Element {
   const open    = tasks.filter((t) => t.status !== "done");
   const done    = tasks.filter((t) => t.status === "done");
   const ordered = [...open, ...done];
@@ -305,7 +367,7 @@ function DayPanel({ date, tasks, onClose, onAddTask, onToggle, onEdit, onDelete 
                 <div className="panel-empty-icon">📋</div>
                 <div>No todos for this day</div>
                 <div style={{ marginTop: 4, fontSize: "0.78rem", color: "var(--text-dim)" }}>
-                  Click "Add todo" to get started
+                  Click &quot;Add todo&quot; to get started
                 </div>
               </div>
             ) : (
@@ -327,19 +389,23 @@ function DayPanel({ date, tasks, onClose, onAddTask, onToggle, onEdit, onDelete 
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
-export default function HomePage() {
-  const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [selectedDay,  setSelectedDay]  = useState(null);
-  const [allTasks,     setAllTasks]     = useState([]);
-  const [loading,      setLoading]      = useState(true);
-  const [modal,        setModal]        = useState(null); // null | { mode: "add"|"edit", task?, date? }
+export default function HomePage(): React.JSX.Element {
+  const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
+  const [selectedDay,  setSelectedDay]  = useState<Date | null>(null);
+  const [allTasks,     setAllTasks]     = useState<Task[]>([]);
+  const [loading,      setLoading]      = useState<boolean>(true);
+  const [modal,        setModal]        = useState<ModalState | null>(null);
 
   // Load all tasks once and keep in state
-  const loadTasks = useCallback(async () => {
+  const loadTasks = useCallback(async (): Promise<void> => {
     setLoading(true);
     try {
-      const data = await fetchAPI("/tasks");
-      const items = (data.items || []).map((item) => item.task ?? item);
+      const data = await fetchAPI<TasksResponse | Task[]>("/tasks");
+      const raw = Array.isArray(data) ? data : (data as TasksResponse).items ?? [];
+      const items = raw.map((item) => {
+        if ("task" in item && item.task !== undefined) return item.task;
+        return item as Task;
+      });
       setAllTasks(items);
     } catch (err) {
       console.error("loadTasks:", err);
@@ -348,11 +414,11 @@ export default function HomePage() {
     }
   }, []);
 
-  useEffect(() => { loadTasks(); }, [loadTasks]);
+  useEffect(() => { void loadTasks(); }, [loadTasks]);
 
   // Group tasks by day key "yyyy-MM-dd"
-  const tasksByDay = useMemo(() => {
-    const map = {};
+  const tasksByDay = useMemo<Record<string, Task[]>>(() => {
+    const map: Record<string, Task[]> = {};
     for (const task of allTasks) {
       if (!task.due_at) continue;
       const key = format(parseISO(task.due_at), "yyyy-MM-dd");
@@ -362,13 +428,13 @@ export default function HomePage() {
     return map;
   }, [allTasks]);
 
-  const calDays = useMemo(() => buildCalendarDays(currentMonth), [currentMonth]);
+  const calDays = useMemo<Date[]>(() => buildCalendarDays(currentMonth), [currentMonth]);
 
   // Tasks for selected day panel
-  const selectedDayTasks = useMemo(() => {
+  const selectedDayTasks = useMemo<Task[]>(() => {
     if (!selectedDay) return [];
     const key = format(selectedDay, "yyyy-MM-dd");
-    return (tasksByDay[key] || []).sort((a, b) => {
+    return (tasksByDay[key] ?? []).sort((a, b) => {
       if (a.status !== b.status) return a.status === "done" ? 1 : -1;
       return a.due_at && b.due_at ? a.due_at.localeCompare(b.due_at) : 0;
     });
@@ -389,10 +455,10 @@ export default function HomePage() {
   }, [allTasks]);
 
   // Toggle task done/open
-  const handleToggle = async (task) => {
+  const handleToggle = async (task: Task): Promise<void> => {
     const newStatus = task.status === "done" ? "open" : "done";
     try {
-      await fetchAPI(`/tasks/${task.id}`, {
+      await fetchAPI<Task>(`/tasks/${task.id}`, {
         method: "PATCH",
         body: JSON.stringify({ status: newStatus }),
       });
@@ -408,7 +474,7 @@ export default function HomePage() {
     }
   };
 
-  const handleDelete = async (task) => {
+  const handleDelete = async (task: Task): Promise<void> => {
     if (!confirm("Delete this todo?")) return;
     try {
       await fetchAPI(`/tasks/${task.id}`, { method: "DELETE" });
@@ -418,22 +484,22 @@ export default function HomePage() {
     }
   };
 
-  const handleSaved = () => {
+  const handleSaved = (): void => {
     setModal(null);
-    loadTasks();
+    void loadTasks();
   };
 
-  const openAddModal = (date) => {
-    setModal({ mode: "add", date: date || selectedDay || new Date() });
+  const openAddModal = (date: Date | null): void => {
+    setModal({ mode: "add", date: date ?? selectedDay ?? new Date() });
   };
 
-  const openEditModal = (task) => {
+  const openEditModal = (task: Task): void => {
     setModal({ mode: "edit", task });
   };
 
-  const handleDayClick = (date) => {
+  const handleDayClick = (date: Date): void => {
     setSelectedDay((prev) =>
-      prev && isSameDay(prev, date) ? null : date
+      prev !== null && isSameDay(prev, date) ? null : date
     );
   };
 
@@ -535,7 +601,7 @@ export default function HomePage() {
           <div className="cal-grid">
             {calDays.map((date) => {
               const key   = format(date, "yyyy-MM-dd");
-              const tasks = tasksByDay[key] || [];
+              const tasks = tasksByDay[key] ?? [];
               return (
                 <DayCell
                   key={key}
@@ -563,10 +629,10 @@ export default function HomePage() {
       </div>
 
       {/* ── Task Modal ────────────────────────────────────────────── */}
-      {modal && (
+      {modal !== null && (
         <TaskModal
-          defaultDate={modal.mode === "add" ? modal.date : null}
-          editTask={modal.mode === "edit" ? modal.task : null}
+          defaultDate={modal.mode === "add" ? (modal.date ?? null) : null}
+          editTask={modal.mode === "edit" ? (modal.task ?? null) : null}
           onClose={() => setModal(null)}
           onSaved={handleSaved}
         />

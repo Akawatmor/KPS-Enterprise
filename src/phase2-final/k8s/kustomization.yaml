@@ -12,7 +12,7 @@ resources:
   #     --from-literal=GITHUB_OAUTH_CLIENT_ID=<id> \
   #     --from-literal=GITHUB_OAUTH_CLIENT_SECRET=<secret>
   # - secret.sample.yaml
-  - core-pvc.yaml
+  - postgres-statefulset.yaml
   - core-deployment.yaml
   - core-service.yaml
   - web-deployment.yaml
