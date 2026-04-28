@@ -20,7 +20,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 when:
-  event: push
+  event: [push, pull_request]
   branch:
     - main
     - develop
@@ -36,6 +36,7 @@ steps:
     image: golang:1.25-bookworm
     depends_on: []
     when:
+      event: [push, pull_request]
       branch: [main, develop]
     commands:
       - cd src/phase2-final/backend
@@ -74,6 +75,7 @@ steps:
     image: node:20-bookworm-slim
     depends_on: []
     when:
+      event: [push, pull_request]
       branch: [main, develop]
     commands:
       - cd src/phase2-final/frontend
@@ -84,6 +86,7 @@ steps:
     image: node:20-bookworm-slim
     depends_on: []
     when:
+      event: [push, pull_request]
       branch: [main, develop]
     commands:
       - cd src/phase2-final/frontend
