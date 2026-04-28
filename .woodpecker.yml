@@ -15,9 +15,9 @@
 #   DOCKER_USERNAME   Docker Hub username
 #   DOCKER_PASSWORD   Docker Hub access token
 #   KUBECONFIG_B64    base64-encoded kubeconfig for K3s master
-#   SMTP_HOST         SMTP server hostname (e.g. smtp.gmail.com)
+#   SMTP_HOST         SMTP server hostname (smtp.gmail.com)
 #   SMTP_USERNAME     Sender email address
-#   SMTP_PASSWORD     App-specific password (Gmail: 16-char app password)
+#   SMTP_PASSWORD     Gmail App Password (16-char)
 #   NOTIFY_EMAIL      Comma-separated recipient(s)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -27,7 +27,6 @@ variables:
   - &kubectl_image  "bitnami/kubectl:1.31"
   - &trivy_image    "aquasec/trivy:0.62"
   - &buildx_image   "woodpeckerci/plugin-docker-buildx:4"
-  - &curl_image     "curlimages/curl:8.12.1"
   - &email_image    "drillster/drone-email"
   - &lhci_image     "patrickhulce/lhci:0.14"
 
@@ -39,9 +38,7 @@ steps:
   #  STAGE 1 — QUALITY GATES  (develop + main)
   # ═══════════════════════════════════════════════════════════════════════════
 
-  # ── 1. Backend · Tests + vet + security + vulncheck (combined) ─────────────
-  #    Combines: go vet, go test, gosec, govulncheck into ONE step
-  #    → eliminates 3x redundant go mod download + container startup
+  # ── 1. Backend · Tests + vet + security + vulncheck ────────────────────────
   - name: quality-backend
     image: *go_image
     depends_on: []
@@ -52,11 +49,9 @@ steps:
       - cd src/phase2-final/backend
       - go mod download
 
-      # ── Vet ──
       - echo "══ go vet ══"
       - go vet ./...
 
-      # ── Unit tests (no -race flag → saves ~60% memory) ──
       - echo "══ go test ══"
       - |
         go test ./... \
@@ -65,19 +60,15 @@ steps:
           -coverprofile=coverage.out
       - go tool cover -func=coverage.out | tail -1
 
-      # ── gosec (static security — OWASP) ──  [main only gate below]
       - echo "══ gosec ══"
       - go install github.com/securego/gosec/v2/cmd/gosec@latest
       - gosec -severity medium -confidence medium -fmt=text ./... || echo "⚠ gosec issues found (non-blocking on develop)"
 
-      # ── govulncheck (dependency CVE — OWASP A06) ──
       - echo "══ govulncheck ══"
       - go install golang.org/x/vuln/cmd/govulncheck@latest
       - govulncheck ./... || echo "⚠ vulns found (non-blocking on develop)"
 
-  # ── 2. Frontend · Typecheck + test + audit (combined) ─────────────────────
-  #    Combines: npm ci, type-check, test, audit into ONE step
-  #    → eliminates 2x redundant npm ci + container startup
+  # ── 2. Frontend · Typecheck + test + audit ─────────────────────────────────
   - name: quality-frontend
     image: *node_image
     depends_on: []
@@ -86,19 +77,14 @@ steps:
       branch: [main, develop]
     commands:
       - cd src/phase2-final/frontend
-
-      # ── Install once, reuse everywhere ──
       - npm ci --prefer-offline
 
-      # ── TypeScript type-check ──
       - echo "══ type-check ══"
       - npm run type-check
 
-      # ── Unit tests ──
       - echo "══ unit tests ══"
       - npm test -- --passWithNoTests
 
-      # ── Dependency audit (OWASP A06) ──
       - echo "══ npm audit ══"
       - npm audit --audit-level=high || echo "⚠ audit issues found (non-blocking on develop)"
 
@@ -118,18 +104,17 @@ steps:
     environment:
       DOCKER_USERNAME:
         from_secret: DOCKER_USERNAME
-    settings:
-      dockerfile: src/phase2-final/backend/Dockerfile
-      context: src/phase2-final/backend
-      repo: ${DOCKER_USERNAME}/todoapp-core
-      tags:
-        - "${CI_COMMIT_SHA:0:7}"
-        - latest
-      cache_from: ${DOCKER_USERNAME}/todoapp-core:latest
-      username:
-        from_secret: DOCKER_USERNAME
-      password:
+      DOCKER_PASSWORD:
         from_secret: DOCKER_PASSWORD
+    commands:
+      - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+      - TAG="${DOCKER_USERNAME}/todoapp-core:${CI_COMMIT_SHA:0:7}"
+      - TAG_LATEST="${DOCKER_USERNAME}/todoapp-core:latest"
+      - echo "══ Building $TAG ══"
+      - docker build -t "$TAG" -t "$TAG_LATEST" src/phase2-final/backend
+      - docker push "$TAG"
+      - docker push "$TAG_LATEST"
+      - docker logout
 
   # ── 4. Build & push · Frontend image ──────────────────────────────────────
   - name: build-push-web
@@ -142,18 +127,17 @@ steps:
     environment:
       DOCKER_USERNAME:
         from_secret: DOCKER_USERNAME
-    settings:
-      dockerfile: src/phase2-final/frontend/Dockerfile
-      context: src/phase2-final/frontend
-      repo: ${DOCKER_USERNAME}/todoapp-web
-      tags:
-        - "${CI_COMMIT_SHA:0:7}"
-        - latest
-      cache_from: ${DOCKER_USERNAME}/todoapp-web:latest
-      username:
-        from_secret: DOCKER_USERNAME
-      password:
+      DOCKER_PASSWORD:
         from_secret: DOCKER_PASSWORD
+    commands:
+      - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+      - TAG="${DOCKER_USERNAME}/todoapp-web:${CI_COMMIT_SHA:0:7}"
+      - TAG_LATEST="${DOCKER_USERNAME}/todoapp-web:latest"
+      - echo "══ Building $TAG ══"
+      - docker build -t "$TAG" -t "$TAG_LATEST" src/phase2-final/frontend
+      - docker push "$TAG"
+      - docker push "$TAG_LATEST"
+      - docker logout
 
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -161,7 +145,6 @@ steps:
   # ═══════════════════════════════════════════════════════════════════════════
 
   # ── 5. Trivy · Scan BOTH images in one step ───────────────────────────────
-  #    → downloads Trivy DB once instead of twice
   - name: trivy-scan
     image: *trivy_image
     depends_on:
@@ -236,14 +219,11 @@ steps:
       - kubectl cluster-info
       - echo "── Target cluster reachable ──"
 
-      # ── 1. Namespace ──
       - kubectl apply -f src/phase2-final/k8s/namespace.yaml
 
-      # ── 2. Database layer ──
       - kubectl apply -f src/phase2-final/k8s/postgres-statefulset.yaml
       - kubectl rollout status statefulset/todoapp-postgres -n todoapp --timeout=120s
 
-      # ── 3. Application manifests (idempotent) ──
       - kubectl apply -f src/phase2-final/k8s/configmap.yaml
       - kubectl apply -f src/phase2-final/k8s/core-deployment.yaml
       - kubectl apply -f src/phase2-final/k8s/core-service.yaml
@@ -251,7 +231,6 @@ steps:
       - kubectl apply -f src/phase2-final/k8s/web-service.yaml
       - kubectl apply -f src/phase2-final/k8s/ingress.yaml
 
-      # ── 4. Roll out new image tags ──
       - |
         kubectl set image deployment/todoapp-core \
           core=${DOCKER_USERNAME}/todoapp-core:${CI_COMMIT_SHA:0:7} \
@@ -261,7 +240,6 @@ steps:
           web=${DOCKER_USERNAME}/todoapp-web:${CI_COMMIT_SHA:0:7} \
           -n todoapp
 
-      # ── 5. Await zero-downtime rollout ──
       - kubectl rollout status deployment/todoapp-core -n todoapp --timeout=180s
       - kubectl rollout status deployment/todoapp-web  -n todoapp --timeout=180s
       - echo "── Deploy complete ──"
@@ -288,7 +266,6 @@ steps:
 
       - sleep 10
 
-      # a. GET /healthz → 200
       - |
         kubectl run smoke-a-${CI_COMMIT_SHA:0:7} \
           --image=curlimages/curl:8.12.1 \
@@ -298,7 +275,6 @@ steps:
           -- curl -sf --retry 3 --retry-delay 5 http://todoapp-core:8080/healthz
       - echo "✓ healthz"
 
-      # b. GET /readyz → 200
       - |
         kubectl run smoke-b-${CI_COMMIT_SHA:0:7} \
           --image=curlimages/curl:8.12.1 \
@@ -308,7 +284,6 @@ steps:
           -- curl -sf --retry 3 --retry-delay 5 http://todoapp-core:8080/readyz
       - echo "✓ readyz"
 
-      # c. POST /api/v1/tasks → 201
       - |
         kubectl run smoke-c-${CI_COMMIT_SHA:0:7} \
           --image=curlimages/curl:8.12.1 \
@@ -323,7 +298,6 @@ steps:
           http://todoapp-core:8080/api/v1/tasks
       - echo "✓ POST /tasks"
 
-      # d. GET /api/v1/tasks → 200
       - |
         kubectl run smoke-d-${CI_COMMIT_SHA:0:7} \
           --image=curlimages/curl:8.12.1 \
@@ -339,13 +313,14 @@ steps:
 
 
   # ═══════════════════════════════════════════════════════════════════════════
-  #  STAGE 6 — NOTIFICATIONS  (main only)
+  #  STAGE 6 — NOTIFICATIONS  (main push only)
   # ═══════════════════════════════════════════════════════════════════════════
 
   # ── 9. Email · Success notification ────────────────────────────────────────
   - name: email-success
     image: *email_image
     depends_on: [smoke-test]
+    failure: ignore          # ← เพิ่มบรรทัดนี้ชั่วคราว
     when:
       - event: push
         branch: main
@@ -426,6 +401,7 @@ steps:
       - trivy-scan
       - deploy-k3s
       - smoke-test
+    failure: ignore          # ← เพิ่มบรรทัดนี้ชั่วคราว
     when:
       - event: push
         branch: main
