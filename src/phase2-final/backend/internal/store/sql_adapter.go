@@ -25,7 +25,8 @@ func NewSQLiteAdapter(dbPath string) (Adapter, error) {
 		return nil, fmt.Errorf("sqlite path cannot be empty")
 	}
 	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	// G301: directory permissions 0750 (owner rwx, group rx, others none)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("create sqlite directory: %w", err)
 	}
 	db, err := sql.Open("sqlite", dbPath)
