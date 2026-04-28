@@ -101,20 +101,17 @@ steps:
     when:
       event: push
       branch: main
-    environment:
-      DOCKER_USERNAME:
+    settings:
+      dockerfile: src/phase2-final/backend/Dockerfile
+      context: src/phase2-final/backend
+      repo: redacted/todoapp-core
+      tags:
+        - "${CI_COMMIT_SHA:0:7}"
+        - latest
+      username:
         from_secret: DOCKER_USERNAME
-      DOCKER_PASSWORD:
+      password:
         from_secret: DOCKER_PASSWORD
-    commands:
-      - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-      - TAG="${DOCKER_USERNAME}/todoapp-core:${CI_COMMIT_SHA:0:7}"
-      - TAG_LATEST="${DOCKER_USERNAME}/todoapp-core:latest"
-      - echo "══ Building $TAG ══"
-      - docker build -t "$TAG" -t "$TAG_LATEST" src/phase2-final/backend
-      - docker push "$TAG"
-      - docker push "$TAG_LATEST"
-      - docker logout
 
   # ── 4. Build & push · Frontend image ──────────────────────────────────────
   - name: build-push-web
@@ -124,20 +121,17 @@ steps:
     when:
       event: push
       branch: main
-    environment:
-      DOCKER_USERNAME:
+    settings:
+      dockerfile: src/phase2-final/frontend/Dockerfile
+      context: src/phase2-final/frontend
+      repo: redacted/todoapp-web
+      tags:
+        - "${CI_COMMIT_SHA:0:7}"
+        - latest
+      username:
         from_secret: DOCKER_USERNAME
-      DOCKER_PASSWORD:
+      password:
         from_secret: DOCKER_PASSWORD
-    commands:
-      - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-      - TAG="${DOCKER_USERNAME}/todoapp-web:${CI_COMMIT_SHA:0:7}"
-      - TAG_LATEST="${DOCKER_USERNAME}/todoapp-web:latest"
-      - echo "══ Building $TAG ══"
-      - docker build -t "$TAG" -t "$TAG_LATEST" src/phase2-final/frontend
-      - docker push "$TAG"
-      - docker push "$TAG_LATEST"
-      - docker logout
 
 
   # ═══════════════════════════════════════════════════════════════════════════
