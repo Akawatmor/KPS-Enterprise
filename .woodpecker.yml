@@ -115,14 +115,17 @@ steps:
     when:
       event: push
       branch: main
+    environment:
+      DOCKER_USERNAME:
+        from_secret: DOCKER_USERNAME
     settings:
       dockerfile: src/phase2-final/backend/Dockerfile
       context: src/phase2-final/backend
-      repo: ${CI_FORGE_OWNER}/todoapp-core
+      repo: ${DOCKER_USERNAME}/todoapp-core
       tags:
         - "${CI_COMMIT_SHA:0:7}"
         - latest
-      cache_from: ${CI_FORGE_OWNER}/todoapp-core:latest
+      cache_from: ${DOCKER_USERNAME}/todoapp-core:latest
       username:
         from_secret: DOCKER_USERNAME
       password:
@@ -136,14 +139,17 @@ steps:
     when:
       event: push
       branch: main
+    environment:
+      DOCKER_USERNAME:
+        from_secret: DOCKER_USERNAME
     settings:
       dockerfile: src/phase2-final/frontend/Dockerfile
       context: src/phase2-final/frontend
-      repo: ${CI_FORGE_OWNER}/todoapp-web
+      repo: ${DOCKER_USERNAME}/todoapp-web
       tags:
         - "${CI_COMMIT_SHA:0:7}"
         - latest
-      cache_from: ${CI_FORGE_OWNER}/todoapp-web:latest
+      cache_from: ${DOCKER_USERNAME}/todoapp-web:latest
       username:
         from_secret: DOCKER_USERNAME
       password:
@@ -341,9 +347,9 @@ steps:
     image: *email_image
     depends_on: [smoke-test]
     when:
-      event: push
-      branch: main
-      status: [success]
+      - event: push
+        branch: main
+        status: [success]
     settings:
       host:
         from_secret: SMTP_HOST
@@ -421,9 +427,9 @@ steps:
       - deploy-k3s
       - smoke-test
     when:
-      event: push
-      branch: main
-      status: [failure]
+      - event: push
+        branch: main
+        status: [failure]
     settings:
       host:
         from_secret: SMTP_HOST
