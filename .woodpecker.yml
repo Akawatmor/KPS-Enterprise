@@ -347,9 +347,9 @@ steps:
     image: *email_image
     depends_on: [smoke-test]
     when:
-      event: push
-      branch: main
-      status: [success]
+      - event: push
+        branch: main
+        status: [success]
     settings:
       host:
         from_secret: SMTP_HOST
@@ -427,9 +427,9 @@ steps:
       - deploy-k3s
       - smoke-test
     when:
-      event: push
-      branch: main
-      status: [failure]
+      - event: push
+        branch: main
+        status: [failure]
     settings:
       host:
         from_secret: SMTP_HOST
