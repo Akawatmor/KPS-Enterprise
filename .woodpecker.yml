@@ -305,6 +305,7 @@ steps:
     image: drillster/drone-email
     depends_on: [smoke-test]
     when:
+      branch: main
       status: [success]
     settings:
       host:
@@ -347,6 +348,7 @@ steps:
     image: drillster/drone-email
     depends_on: [smoke-test]
     when:
+      branch: main
       status: [failure]
     settings:
       host:
