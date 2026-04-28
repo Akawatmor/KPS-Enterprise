@@ -51,12 +51,19 @@ func (h *Handler) Readyz(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if h.cfg.DataBackend == "sqlite" {
-		dbPath := h.cfg.SQLitePath
-		if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		// G304: resolve to a clean absolute path to prevent directory traversal
+		dbPath := filepath.Clean(h.cfg.SQLitePath)
+		if !filepath.IsAbs(dbPath) {
+			writeError(w, http.StatusInternalServerError, "sqlite path must be absolute")
+			return
+		}
+		// G301: directory permissions 0750 (owner rwx, group rx, others none)
+		if err := os.MkdirAll(filepath.Dir(dbPath), 0o750); err != nil {
 			writeError(w, http.StatusServiceUnavailable, "sqlite volume not writable")
 			return
 		}
-		f, err := os.OpenFile(dbPath, os.O_CREATE|os.O_RDWR, 0o644)
+		// G302: file permissions 0600 (owner rw, no group/others access)
+		f, err := os.OpenFile(dbPath, os.O_CREATE|os.O_RDWR, 0o600) // #nosec G304 -- path is cleaned and validated above
 		if err != nil {
 			writeError(w, http.StatusServiceUnavailable, "sqlite file not writable")
 			return
