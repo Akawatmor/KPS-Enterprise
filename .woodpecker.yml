@@ -19,12 +19,6 @@
 #                        "you@gmail.com,instructor@example.com,team@example.com"
 # ─────────────────────────────────────────────────────────────────────────────
 
-when:
-  event: [push, pull_request]
-  branch:
-    - main
-    - develop
-
 steps:
 
   # ════════════════════════════════════════════════════════════════════════════
