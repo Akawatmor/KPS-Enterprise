@@ -35,3 +35,4 @@
 **.eslintignore
 **.prettierignore
 **.stylelintignore
+cosign.key

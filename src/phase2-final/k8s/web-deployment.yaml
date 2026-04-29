@@ -34,35 +34,66 @@ spec:
               name: http
           env:
             - name: HOSTNAME
-              # Override K8s auto-injected HOSTNAME (pod name) so Next.js binds to 0.0.0.0.
               value: "0.0.0.0"
             - name: PORT
               value: "3000"
             - name: NEXT_PUBLIC_API_BASE_URL
-              # Requests go through Traefik ingress to the core service.
               value: ""
+
+          # ── Startup: ใจดี ให้ Next.js boot ──────────────
+          startupProbe:
+            httpGet:
+              path: /
+              port: 3000 # ← Fix: 80 → 3000
+            periodSeconds: 5
+            failureThreshold: 24 # รอได้ 120s
+            timeoutSeconds: 3
+
+          # ── Readiness: เช็คถี่ๆ ว่ารับ traffic ได้ไหม ──
           readinessProbe:
             httpGet:
               path: /
-              port: http
-            initialDelaySeconds: 8
+              port: 3000 # ← Fix
+            initialDelaySeconds: 5
             periodSeconds: 5
-            failureThreshold: 3
+            timeoutSeconds: 3
+            failureThreshold: 2
+            successThreshold: 1
+
+          # ── Liveness: เช็คห่างๆ ว่ายังเป็น/ตาย (ใหม่!) ──
           livenessProbe:
-            httpGet:
-              path: /
-              port: http
-            initialDelaySeconds: 20
-            periodSeconds: 10
+            tcpSocket:
+              port: 3000 # ← Fix
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
             failureThreshold: 3
+
+          volumeMounts:
+            - name: nextjs-cache
+              mountPath: /app/.next/cache # ← Next.js ต้องเขียนตรงนี้
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               cpu: 100m
               memory: 128Mi
+              ephemeral-storage: 100Mi
             limits:
               cpu: 600m
               memory: 512Mi
+              ephemeral-storage: 500Mi
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
             runAsUser: 1001
+      volumes:
+        - name: nextjs-cache
+          emptyDir:
+            sizeLimit: 200Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 100Mi
