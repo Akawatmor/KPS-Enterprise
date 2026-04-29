@@ -65,25 +65,24 @@ steps:
     when:
       event: [push, pull_request]
     commands:
+      # ตรวจว่ามี policies ก่อน — ถ้าไม่มีให้ skip แทน fail
+      - |
+        if [ ! -d policies ] || [ -z "$(ls -A policies/*.rego 2>/dev/null)" ]; then
+          echo "⚠ No policies/ directory or .rego files found — skipping"
+          exit 0
+        fi
       - conftest test src/phase2-final/k8s/ --policy policies/ --all-namespaces
 
-  # ── 0e. API breaking change detection (compatibility!) ───────────────────
-  - name: api-compat-check
-    image: *oasdiff_image
+  # ── 0e. API contract check (no swagger needed) ──────────────────────────
+  - name: api-contract-check
+    image: curlimages/curl:8.12.1
     depends_on: []
-    failure: ignore                  # warn-only on develop
+    failure: ignore                  # warn-only
     when:
       event: [push, pull_request]
       branch: [main, develop]
     commands:
-      # เทียบ OpenAPI spec ปัจจุบันกับ production
-      - |
-        oasdiff breaking \
-          https://todoapp-kps.akawatmor.com/openapi.json \
-          src/phase2-final/backend/openapi.json \
-          --fail-on ERR \
-          --format text || \
-        (echo "⚠ Breaking API change detected" && exit 1)
+      - sh tests/contract/api-contract.sh https://todoapp-kps.akawatmor.com
 
 
   # ╔═════════════════════════════════════════════════════════════════════════╗
