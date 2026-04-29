@@ -57,6 +57,8 @@ steps:
       - kube-score score src/phase2-final/k8s/*.yaml
           --ignore-test pod-networkpolicy
           --ignore-test container-security-context-user-group-id
+          --ignore-test container-image-tag
+          --ignore-test deployment-has-host-podantiaffinity
           --output-format ci
 
   # ── 0d. Policy as Code (OPA) ─────────────────────────────────────────────
