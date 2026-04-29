@@ -251,14 +251,24 @@ steps:
       - echo "── Target cluster reachable ──"
 
       - kubectl apply -f src/phase2-final/k8s/namespace.yaml
+      
+      # ── Secret 1: สำหรับ Postgres pod (ใช้ตอน initialize DB) ──
       - |
         kubectl create secret generic todoapp-postgres-secret \
           --namespace=todoapp \
           --from-literal=POSTGRES_USER="$PG_USER" \
           --from-literal=POSTGRES_PASSWORD="$PG_PASSWORD" \
           --from-literal=POSTGRES_DB="$PG_DATABASE" \
+          --dry-run=client -o yaml | kubectl apply -f -
+
+      # ── Secret 2: สำหรับ Core app (ใช้เชื่อมต่อ DB) ──
+      - |
+        kubectl create secret generic todoapp-secret \
+          --namespace=todoapp \
           --from-literal=POSTGRES_DSN="postgres://$PG_USER:$PG_PASSWORD@todoapp-postgres:5432/$PG_DATABASE?sslmode=disable" \
           --dry-run=client -o yaml | kubectl apply -f -
+
+          
       - kubectl apply -f src/phase2-final/k8s/postgres-statefulset.yaml
       - kubectl rollout status statefulset/todoapp-postgres -n todoapp --timeout=120s
 
