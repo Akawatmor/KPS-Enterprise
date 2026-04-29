@@ -257,6 +257,7 @@ steps:
           --from-literal=POSTGRES_USER="$PG_USER" \
           --from-literal=POSTGRES_PASSWORD="$PG_PASSWORD" \
           --from-literal=POSTGRES_DB="$PG_DATABASE" \
+          --from-literal=POSTGRES_DSN="postgres://$PG_USER:$PG_PASSWORD@todoapp-postgres:5432/$PG_DATABASE?sslmode=disable" \
           --dry-run=client -o yaml | kubectl apply -f -
       - kubectl apply -f src/phase2-final/k8s/postgres-statefulset.yaml
       - kubectl rollout status statefulset/todoapp-postgres -n todoapp --timeout=120s
