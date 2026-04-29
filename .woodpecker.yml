@@ -645,8 +645,8 @@ services:
     preflight ✅ → quality ✅ → integration ✅ → build ✅ → sign ✅
    → scan ✅ → snapshot ✅ → migrate-test ✅
    → canary 10% ✅ → analyze ✅ → 50/50 ✅ → 100% ✅
-   → smoke ✅ → load ✅"
-         </pre>
+   → smoke ✅ → load ✅
+          </pre>
 
           <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:16px">
             <tr style="background:#f9fafb">
