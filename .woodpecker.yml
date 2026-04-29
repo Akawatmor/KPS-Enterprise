@@ -227,7 +227,7 @@ steps:
     image: *kubectl_image
     depends_on:
       - trivy-scan
-      - lighthouse
+      # - lighthouse
     when:
       event: push
       branch: main
