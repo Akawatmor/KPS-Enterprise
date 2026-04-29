@@ -37,7 +37,7 @@ spec:
           # Docker Hub image — DOCKER_USERNAME is set as a Woodpecker secret.
           # Woodpecker will replace the tag on deploy.
           image: akawatmor/todoapp-core:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
               name: http
@@ -64,12 +64,19 @@ spec:
             requests:
               cpu: 50m
               memory: 64Mi
+              ephemeral-storage: 100Mi
             limits:
               cpu: 400m
               memory: 256Mi
+              ephemeral-storage: 500Mi
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
-            runAsUser: 65532
+            capabilities: 
+              drop: ["ALL"]
+          volumeMounts: 
+            - name: tmp
+              mountPath: /tmp
+          runAsUser: 65532
       # No volumes — data lives in PostgreSQL (todoapp-postgres StatefulSet)
