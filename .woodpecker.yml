@@ -92,7 +92,27 @@ steps:
   # ═══════════════════════════════════════════════════════════════════════════
   #  STAGE 2 — BUILD & PUSH  (main only)
   # ═══════════════════════════════════════════════════════════════════════════
-
+  # ── DEBUG: ลบ step นี้หลัง debug เสร็จ ─────────────────────────────────────
+  - name: debug-docker-auth
+    image: docker:27-cli
+    privileged: true
+    depends_on: [quality-backend]
+    when:
+      event: push
+      branch: main
+    environment:
+      DOCKER_USERNAME:
+        from_secret: DOCKER_USERNAME
+      DOCKER_PASSWORD:
+        from_secret: DOCKER_PASSWORD
+    commands:
+      # เช็คความยาว (ไม่โชว์ค่าจริง)
+      - echo "USERNAME length = $(echo -n "$DOCKER_USERNAME" | wc -c)"
+      - echo "PASSWORD length = $(echo -n "$DOCKER_PASSWORD" | wc -c)"
+      # เช็ค whitespace ซ่อน
+      - echo "USERNAME hex tail = $(echo -n "$DOCKER_USERNAME" | xxd | tail -1)"
+      # ลอง login
+      - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin && echo "✅ Login OK" || echo "❌ Login FAILED"
   # ── 3. Build & push · Backend image ────────────────────────────────────────
   - name: build-push-core
     image: *buildx_image
@@ -314,7 +334,7 @@ steps:
   - name: email-success
     image: *email_image
     depends_on: [smoke-test]
-    failure: ignore          # ← เพิ่มบรรทัดนี้ชั่วคราว
+    # failure: ignore          # ← เพิ่มบรรทัดนี้ชั่วคราว
     when:
       - event: push
         branch: main
@@ -395,7 +415,7 @@ steps:
       - trivy-scan
       - deploy-k3s
       - smoke-test
-    failure: ignore          # ← เพิ่มบรรทัดนี้ชั่วคราว
+    # failure: ignore          # ← เพิ่มบรรทัดนี้ชั่วคราว
     when:
       - event: push
         branch: main
