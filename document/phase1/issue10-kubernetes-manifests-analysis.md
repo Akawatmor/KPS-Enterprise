@@ -228,8 +228,8 @@ metadata:
   name: mongodb-secret
 type: Opaque
 data:
-  mongo-username: YWRtaW4=           # admin (base64)
-  mongo-password: cGFzc3dvcmQxMjM=   # password123 (base64)
+  mongo-username: Redacted # admin (base64)
+  mongo-password: Redacted # password123 (base64)
 ```
 
 **⚠️ Security Warning:**
