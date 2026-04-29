@@ -25,11 +25,11 @@ variables:
   - &go_image       "golang:1.25-bookworm"
   - &node_image     "node:22-bookworm-slim"
   - &kubectl_image  "bitnami/kubectl:1.31"
-  - &trivy_image    "aquasec/trivy:0.62"
+  - &trivy_image    "aquasec/trivy:0.69.3"
   - &buildx_image   "woodpeckerci/plugin-docker-buildx:4"
   - &email_image    "drillster/drone-email"
   - &lhci_image     "patrickhulce/lhci:0.14"
-
+  
 # ─────────────────────────────────────────────────────────────────────────────
 
 steps:
@@ -197,12 +197,14 @@ steps:
 
   # ── 6. Lighthouse CI · Performance & accessibility audit ───────────────────
   - name: lighthouse
-    image: *lhci_image
+    image: node:22-bookworm-slim
     depends_on: [build-push-web]
+    failure: ignore
     when:
       event: push
       branch: main
     commands:
+      - npm install -g @lhci/cli
       - cd src/phase2-final/frontend
       - lhci autorun --upload.target=temporary-public-storage || true
 
@@ -333,7 +335,7 @@ steps:
   # ── DEBUG: ลบหลัง debug เสร็จ ──────────────────────────────────────────────
   - name: debug-email
     image: alpine:3.20
-    depends_on: [smoke-test]
+    depends_on: [quality-backend]
     failure: ignore
     when:
       - event: push
