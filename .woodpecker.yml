@@ -632,8 +632,7 @@ services:
       content_type: text/html
       body: |
         <html>
-        <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-                     max-width:640px;margin:0 auto;padding:24px;color:#1f2937">
+        <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:640px;margin:0 auto;padding:24px;color:#1f2937">
           <div style="background:#f0fdf4;border-left:4px solid #22c55e;padding:16px;margin-bottom:24px">
             <h2 style="color:#15803d;margin:0">✅ Canary Promoted Successfully</h2>
             <p style="margin:8px 0 0;color:#166534">
@@ -717,8 +716,7 @@ preflight ✅ → quality ✅ → integration ✅ → build ✅ → sign ✅
       content_type: text/html
       body: |
         <html>
-        <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-                     max-width:640px;margin:0 auto;padding:24px;color:#1f2937">
+        <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:640px;margin:0 auto;padding:24px;color:#1f2937">
           <div style="background:#fef2f2;border-left:4px solid #ef4444;padding:16px;margin-bottom:24px">
             <h2 style="color:#dc2626;margin:0">🚨 Auto-Rollback Executed</h2>
             <p style="margin:8px 0 0;color:#991b1b">
@@ -801,8 +799,7 @@ preflight ✅ → quality ✅ → integration ✅ → build ✅ → sign ✅
       content_type: text/html
       body: |
         <html>
-        <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-                     max-width:640px;margin:0 auto;padding:24px;color:#1f2937">
+        <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:640px;margin:0 auto;padding:24px;color:#1f2937">
           <div style="background:#fef2f2;border-left:4px solid #ef4444;padding:16px;margin-bottom:24px">
             <h2 style="color:#dc2626;margin:0">❌ Pipeline Failed (Pre-Deploy)</h2>
             <p style="margin:8px 0 0;color:#991b1b">
