@@ -1,29 +1,3 @@
-# PostgreSQL 16 StatefulSet for TodoApp
-# Replaces the SQLite PVC — backend can now run ≥2 replicas with RollingUpdate.
-#
-# Pre-requisites (one-time, before first deploy):
-#   kubectl create secret generic todoapp-postgres-secret -n todoapp \
-#     --from-literal=POSTGRES_PASSWORD=<strong-password>
-#
-# Then patch todoapp-secret to include the DSN (see postgres-secret.sample.yaml).
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: todoapp-postgres
-  namespace: todoapp
-  labels:
-    app: todoapp-postgres
-    app.kubernetes.io/part-of: todoapp
-spec:
-  clusterIP: None  # Headless — stable DNS: todoapp-postgres.todoapp.svc.cluster.local
-  selector:
-    app: todoapp-postgres
-  ports:
-    - name: postgres
-      port: 5432
-      targetPort: 5432
----
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -31,7 +5,8 @@ metadata:
   namespace: todoapp
   labels:
     app: todoapp-postgres
-    app.kubernetes.io/part-of: todoapp
+    component: database
+    tier: data
 spec:
   serviceName: todoapp-postgres
   replicas: 1
@@ -40,57 +15,79 @@ spec:
       app: todoapp-postgres
   template:
     metadata:
-      labels:
+      labels: 
         app: todoapp-postgres
+        component: database
+        tier: data
     spec:
       securityContext:
-        fsGroup: 70  # postgres user's group in alpine — ensures data volume is writable
+        runAsNonRoot: true
+        runAsUser: 999          # postgres user UID
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: postgres
           image: postgres:16-alpine
           ports:
             - containerPort: 5432
               name: postgres
+          envFrom:
+            - secretRef:
+                name: todoapp-postgres-secret
           env:
-            - name: POSTGRES_DB
-              value: todoapp
-            - name: POSTGRES_USER
-              value: todoapp
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: todoapp-postgres-secret
-                  key: POSTGRES_PASSWORD
-          readinessProbe:
-            exec:
-              command: ["pg_isready", "-U", "todoapp", "-d", "todoapp"]
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            failureThreshold: 3
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 1000m, memory: 1Gi }
+
+          # ── Fix A: probe แยกกัน ──────────────────────────
           livenessProbe:
             exec:
-              command: ["pg_isready", "-U", "todoapp", "-d", "todoapp"]
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
             initialDelaySeconds: 30
-            periodSeconds: 10
-            failureThreshold: 5
-          resources:
-            requests:
-              cpu: 100m
-              memory: 128Mi
-            limits:
-              cpu: 500m
-              memory: 512Mi
+            periodSeconds: 30      # ← เช็คห่างๆ เพราะ heavy
+            timeoutSeconds: 10
+            failureThreshold: 6    # ← ใจดี ให้ retry นาน
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-h", "127.0.0.1"]
+            initialDelaySeconds: 5
+            periodSeconds: 5       # ← เช็คถี่ๆ
+            timeoutSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)"]
+            periodSeconds: 5
+            failureThreshold: 30   # ← รอได้สูงสุด 150s ตอน startup ครั้งแรก
+
+          # ── Fix B: readOnlyRootFilesystem + writable volumes ──
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
           volumeMounts:
-            - name: postgres-data
+            - name: data
               mountPath: /var/lib/postgresql/data
+            - name: tmp
+              mountPath: /tmp
+            - name: run
+              mountPath: /var/run/postgresql
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+
   volumeClaimTemplates:
     - metadata:
-        name: postgres-data
+        name: data
       spec:
-        accessModes: ["ReadWriteOnce"]
-        storageClassName: local-path
+        accessModes: [ReadWriteOnce]
         resources:
           requests:
             storage: 5Gi
