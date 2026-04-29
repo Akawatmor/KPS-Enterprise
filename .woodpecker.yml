@@ -28,7 +28,7 @@
 variables:
   - &go_image       "golang:1.25-bookworm"
   - &node_image     "node:22-bookworm-slim"
-  - &kubectl_image  "bitnami/kubectl:1.31"
+  - &kubectl_image  "registry.k8s.io/kubectl:v1.31.0"
   - &trivy_image    "aquasec/trivy:0.69.3"
   - &buildx_image   "woodpeckerci/plugin-docker-buildx:4"
   - &email_image    "drillster/drone-email"
