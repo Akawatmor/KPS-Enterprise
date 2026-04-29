@@ -17,8 +17,12 @@
 #   KUBECONFIG_B64    base64-encoded kubeconfig for K3s master
 #   SMTP_HOST         SMTP server hostname (smtp.gmail.com)
 #   SMTP_USERNAME     Sender email address
-#   SMTP_PASSWORD     Gmail App Password (16-char)
-#   NOTIFY_EMAIL      Comma-separated recipient(s)
+#   SMTP_PASSWORD     Gmail App Password (16-char, no spaces)
+#   NOTIFY_EMAIL      Comma-separated recipient(s), no quotes
+#
+# Agent requirement
+# ─────────────────
+#   WOODPECKER_BACKEND_DOCKER_VOLUMES=/tmp/woodpecker-cache:/cache
 # ─────────────────────────────────────────────────────────────────────────────
 
 variables:
@@ -28,8 +32,7 @@ variables:
   - &trivy_image    "aquasec/trivy:0.69.3"
   - &buildx_image   "woodpeckerci/plugin-docker-buildx:4"
   - &email_image    "drillster/drone-email"
-  - &lhci_image     "patrickhulce/lhci:0.14"
-  
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 steps:
@@ -45,7 +48,15 @@ steps:
     when:
       event: [push, pull_request]
       branch: [main, develop]
+    environment:
+      GOMODCACHE: /cache/go/mod
+      GOCACHE: /cache/go/build
+      GOBIN: /cache/go/bin
     commands:
+      # ── Setup cached tools path ──
+      - export PATH="/cache/go/bin:$PATH"
+      - mkdir -p /cache/go/mod /cache/go/build /cache/go/bin
+
       - cd src/phase2-final/backend
       - go mod download
 
@@ -60,12 +71,13 @@ steps:
           -coverprofile=coverage.out
       - go tool cover -func=coverage.out | tail -1
 
+      # ── Install tools only if not cached ──
       - echo "══ gosec ══"
-      - go install github.com/securego/gosec/v2/cmd/gosec@latest
+      - test -f /cache/go/bin/gosec || go install github.com/securego/gosec/v2/cmd/gosec@latest
       - gosec -severity medium -confidence medium -fmt=text ./... || echo "⚠ gosec issues found (non-blocking on develop)"
 
       - echo "══ govulncheck ══"
-      - go install golang.org/x/vuln/cmd/govulncheck@latest
+      - test -f /cache/go/bin/govulncheck || go install golang.org/x/vuln/cmd/govulncheck@latest
       - govulncheck ./... || echo "⚠ vulns found (non-blocking on develop)"
 
   # ── 2. Frontend · Typecheck + test + audit ─────────────────────────────────
@@ -75,9 +87,15 @@ steps:
     when:
       event: [push, pull_request]
       branch: [main, develop]
+    environment:
+      NPM_CONFIG_CACHE: /cache/npm
     commands:
+      - mkdir -p /cache/npm
+
       - cd src/phase2-final/frontend
-      - npm ci --prefer-offline
+
+      # ── npm ci ใช้ cache → เร็วขึ้นมากถ้า package-lock ไม่เปลี่ยน ──
+      - npm ci --prefer-offline --cache /cache/npm
 
       - echo "══ type-check ══"
       - npm run type-check
@@ -92,27 +110,7 @@ steps:
   # ═══════════════════════════════════════════════════════════════════════════
   #  STAGE 2 — BUILD & PUSH  (main only)
   # ═══════════════════════════════════════════════════════════════════════════
-  # ── DEBUG: ลบ step นี้หลัง debug เสร็จ ─────────────────────────────────────
-  - name: debug-docker-auth
-    image: docker:27-cli
-    privileged: true
-    depends_on: [quality-backend]
-    when:
-      event: push
-      branch: main
-    environment:
-      DOCKER_USERNAME:
-        from_secret: DOCKER_USERNAME
-      DOCKER_PASSWORD:
-        from_secret: DOCKER_PASSWORD
-    commands:
-      # เช็คความยาว (ไม่โชว์ค่าจริง)
-      - echo "USERNAME length = $(echo -n "$DOCKER_USERNAME" | wc -c)"
-      - echo "PASSWORD length = $(echo -n "$DOCKER_PASSWORD" | wc -c)"
-      # เช็ค whitespace ซ่อน
-      - echo "USERNAME hex tail = $(echo -n "$DOCKER_USERNAME" | xxd | tail -1)"
-      # ลอง login
-      - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin && echo "✅ Login OK" || echo "❌ Login FAILED"
+
   # ── 3. Build & push · Backend image ────────────────────────────────────────
   - name: build-push-core
     image: *buildx_image
@@ -124,10 +122,12 @@ steps:
     settings:
       dockerfile: src/phase2-final/backend/Dockerfile
       context: src/phase2-final/backend
-      repo: akawatmor/todoapp-core 
+      repo: akawatmor/todoapp-core
       tags:
         - "${CI_COMMIT_SHA:0:7}"
         - latest
+      # ── Layer cache: ใช้ latest image เป็น cache source ──
+      cache_from: akawatmor/todoapp-core:latest
       username:
         from_secret: DOCKER_USERNAME
       password:
@@ -148,6 +148,7 @@ steps:
       tags:
         - "${CI_COMMIT_SHA:0:7}"
         - latest
+      cache_from: akawatmor/todoapp-web:latest
       username:
         from_secret: DOCKER_USERNAME
       password:
@@ -176,7 +177,11 @@ steps:
         from_secret: DOCKER_USERNAME
       TRIVY_PASSWORD:
         from_secret: DOCKER_PASSWORD
+      # ── Cache Trivy DB → ไม่ต้อง download ทุกรอบ ──
+      TRIVY_CACHE_DIR: /cache/trivy
     commands:
+      - mkdir -p /cache/trivy
+
       - echo "══ Scanning backend image ══"
       - |
         trivy image \
@@ -197,14 +202,18 @@ steps:
 
   # ── 6. Lighthouse CI · Performance & accessibility audit ───────────────────
   - name: lighthouse
-    image: node:22-bookworm-slim
+    image: *node_image
     depends_on: [build-push-web]
     failure: ignore
     when:
       event: push
       branch: main
+    environment:
+      NPM_CONFIG_CACHE: /cache/npm
     commands:
-      - npm install -g @lhci/cli
+      - mkdir -p /cache/npm
+      # ── Install เฉพาะเมื่อยังไม่มี ──
+      - which lhci || npm install -g @lhci/cli
       - cd src/phase2-final/frontend
       - lhci autorun --upload.target=temporary-public-storage || true
 
@@ -332,56 +341,11 @@ steps:
   #  STAGE 6 — NOTIFICATIONS  (main push only)
   # ═══════════════════════════════════════════════════════════════════════════
 
-  # ── DEBUG: ลบหลัง debug เสร็จ ──────────────────────────────────────────────
-  - name: debug-email
-    image: alpine:3.20
-    depends_on: [quality-backend]
-    failure: ignore
-    when:
-      - event: push
-        branch: main
-    environment:
-      NOTIFY_EMAIL:
-        from_secret: NOTIFY_EMAIL
-      SMTP_HOST:
-        from_secret: SMTP_HOST
-      SMTP_USERNAME:
-        from_secret: SMTP_USERNAME
-      SMTP_PASSWORD:
-        from_secret: SMTP_PASSWORD
-    commands:
-      # เช็คจำนวนผู้รับ
-      - echo "── NOTIFY_EMAIL ──"
-      - echo "LENGTH = $(echo -n "$NOTIFY_EMAIL" | wc -c)"
-      - echo "RECIPIENTS COUNT = $(echo "$NOTIFY_EMAIL" | tr ',' '\n' | wc -l)"
-      - echo "RECIPIENTS LIST:"
-      - echo "$NOTIFY_EMAIL" | tr ',' '\n' | while read addr; do echo "  → [$(echo -n "$addr" | wc -c) chars] $addr"; done
-
-      # เช็ค whitespace ซ่อน
-      - echo "── HEX DUMP (หา space/newline ซ่อน) ──"
-      - echo -n "$NOTIFY_EMAIL" | xxd
-
-      # เช็ค SMTP settings
-      - echo "── SMTP ──"
-      - echo "HOST = $SMTP_HOST"
-      - echo "USERNAME LENGTH = $(echo -n "$SMTP_USERNAME" | wc -c)"
-      - echo "PASSWORD LENGTH = $(echo -n "$SMTP_PASSWORD" | wc -c)"
-
-      # ลอง resolve SMTP host
-      - apk add --no-cache bind-tools > /dev/null 2>&1
-      - echo "── DNS CHECK ──"
-      - dig +short MX $SMTP_HOST || echo "❌ Cannot resolve $SMTP_HOST"
-
-      # ลอง connect SMTP port
-      - apk add --no-cache netcat-openbsd > /dev/null 2>&1
-      - echo "── SMTP CONNECTION ──"
-      - nc -zv -w5 $SMTP_HOST 587 2>&1 && echo "✅ Port 587 OK" || echo "❌ Port 587 FAILED"
-      
   # ── 9. Email · Success notification ────────────────────────────────────────
   - name: email-success
     image: *email_image
     depends_on: [smoke-test]
-    # failure: ignore          # ← เพิ่มบรรทัดนี้ชั่วคราว
+    failure: ignore
     when:
       - event: push
         branch: main
@@ -462,7 +426,7 @@ steps:
       - trivy-scan
       - deploy-k3s
       - smoke-test
-    # failure: ignore          # ← เพิ่มบรรทัดนี้ชั่วคราว
+    failure: ignore
     when:
       - event: push
         branch: main
