@@ -259,24 +259,60 @@ services:
 
   # ── Sign images with Cosign (supply chain) ───────────────────────────────
   - name: sign-images
-    image: *cosign_image
+    image: alpine:3.20
     depends_on: [build-push-core, build-push-web]
     when:
       event: push
       branch: main
     environment:
-      COSIGN_KEY: { from_secret: COSIGN_PRIVATE_KEY }
-      COSIGN_PASSWORD: { from_secret: COSIGN_PASSWORD }
-      DOCKER_USERNAME: { from_secret: DOCKER_USERNAME }
-      DOCKER_PASSWORD: { from_secret: DOCKER_PASSWORD }
+      COSIGN_KEY:
+        from_secret: COSIGN_PRIVATE_KEY
+      COSIGN_PASSWORD:
+        from_secret: COSIGN_PASSWORD
+      DOCKER_USERNAME:
+        from_secret: DOCKER_USERNAME
+      DOCKER_PASSWORD:
+        from_secret: DOCKER_PASSWORD
     commands:
+      - apk add --no-cache curl ca-certificates
+      - curl -sSL -o /usr/local/bin/cosign https://github.com/sigstore/cosign/releases/download/v2.4.0/cosign-linux-amd64
+      - chmod +x /usr/local/bin/cosign
+      - cosign version
       - echo "$DOCKER_PASSWORD" | cosign login -u "$DOCKER_USERNAME" --password-stdin docker.io
       - echo "$COSIGN_KEY" > /tmp/cosign.key
       - cosign sign --yes --key /tmp/cosign.key akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7}
       - cosign sign --yes --key /tmp/cosign.key akawatmor/todoapp-web:${CI_COMMIT_SHA:0:7}
-      # Generate + attest SBOM
-      - cosign attach sbom --sbom <(trivy image --format cyclonedx akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7}) akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7}
-      - shred -u /tmp/cosign.key
+      - rm -f /tmp/cosign.key
+      - echo "✅ Images signed"
+
+  - name: sbom-attest
+    image: alpine:3.20
+    depends_on: [sign-images]
+    when:
+      event: push
+      branch: main
+    environment:
+      COSIGN_KEY:      { from_secret: COSIGN_PRIVATE_KEY }
+      COSIGN_PASSWORD: { from_secret: COSIGN_PASSWORD }
+      DOCKER_USERNAME: { from_secret: DOCKER_USERNAME }
+      DOCKER_PASSWORD: { from_secret: DOCKER_PASSWORD }
+    commands:
+      - apk add --no-cache curl ca-certificates bash
+      # Install cosign
+      - curl -sSL -o /usr/local/bin/cosign https://github.com/sigstore/cosign/releases/download/v2.4.0/cosign-linux-amd64
+      - chmod +x /usr/local/bin/cosign
+      # Install trivy
+      - curl -sSL https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_Linux-64bit.tar.gz | tar xz -C /usr/local/bin/
+      # Login
+      - echo "$DOCKER_PASSWORD" | cosign login -u "$DOCKER_USERNAME" --password-stdin docker.io
+      - echo "$COSIGN_KEY" > /tmp/cosign.key
+      # Generate + attach SBOM (2 steps, no process substitution)
+      - trivy image --format cyclonedx --output /tmp/sbom-core.json akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7}
+      - cosign attach sbom --sbom /tmp/sbom-core.json akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7}
+      - trivy image --format cyclonedx --output /tmp/sbom-web.json akawatmor/todoapp-web:${CI_COMMIT_SHA:0:7}
+      - cosign attach sbom --sbom /tmp/sbom-web.json akawatmor/todoapp-web:${CI_COMMIT_SHA:0:7}
+      - rm -f /tmp/cosign.key /tmp/sbom-*.json
+      - echo "✅ SBOM attached to both images"
 
   # ╔═════════════════════════════════════════════════════════════════════════╗
   # ║  STAGE 4 — VULNERABILITY & POLICY SCAN                                  ║
