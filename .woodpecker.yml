@@ -330,6 +330,51 @@ steps:
   #  STAGE 6 — NOTIFICATIONS  (main push only)
   # ═══════════════════════════════════════════════════════════════════════════
 
+  # ── DEBUG: ลบหลัง debug เสร็จ ──────────────────────────────────────────────
+  - name: debug-email
+    image: alpine:3.20
+    depends_on: [smoke-test]
+    failure: ignore
+    when:
+      - event: push
+        branch: main
+    environment:
+      NOTIFY_EMAIL:
+        from_secret: NOTIFY_EMAIL
+      SMTP_HOST:
+        from_secret: SMTP_HOST
+      SMTP_USERNAME:
+        from_secret: SMTP_USERNAME
+      SMTP_PASSWORD:
+        from_secret: SMTP_PASSWORD
+    commands:
+      # เช็คจำนวนผู้รับ
+      - echo "── NOTIFY_EMAIL ──"
+      - echo "LENGTH = $(echo -n "$NOTIFY_EMAIL" | wc -c)"
+      - echo "RECIPIENTS COUNT = $(echo "$NOTIFY_EMAIL" | tr ',' '\n' | wc -l)"
+      - echo "RECIPIENTS LIST:"
+      - echo "$NOTIFY_EMAIL" | tr ',' '\n' | while read addr; do echo "  → [$(echo -n "$addr" | wc -c) chars] $addr"; done
+
+      # เช็ค whitespace ซ่อน
+      - echo "── HEX DUMP (หา space/newline ซ่อน) ──"
+      - echo -n "$NOTIFY_EMAIL" | xxd
+
+      # เช็ค SMTP settings
+      - echo "── SMTP ──"
+      - echo "HOST = $SMTP_HOST"
+      - echo "USERNAME LENGTH = $(echo -n "$SMTP_USERNAME" | wc -c)"
+      - echo "PASSWORD LENGTH = $(echo -n "$SMTP_PASSWORD" | wc -c)"
+
+      # ลอง resolve SMTP host
+      - apk add --no-cache bind-tools > /dev/null 2>&1
+      - echo "── DNS CHECK ──"
+      - dig +short MX $SMTP_HOST || echo "❌ Cannot resolve $SMTP_HOST"
+
+      # ลอง connect SMTP port
+      - apk add --no-cache netcat-openbsd > /dev/null 2>&1
+      - echo "── SMTP CONNECTION ──"
+      - nc -zv -w5 $SMTP_HOST 587 2>&1 && echo "✅ Port 587 OK" || echo "❌ Port 587 FAILED"
+      
   # ── 9. Email · Success notification ────────────────────────────────────────
   - name: email-success
     image: *email_image
