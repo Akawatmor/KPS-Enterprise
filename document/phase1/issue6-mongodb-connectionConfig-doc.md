@@ -415,8 +415,8 @@ metadata:
   name: mongo-sec
 type: Opaque
 data:
-  password: cGFzc3dvcmQxMjM= #password123
-  username: YWRtaW4= #admin
+  password: Redacted #password123
+  username: Redacted #admin
 ```
 
 ### Secret Structure
