@@ -236,6 +236,12 @@ steps:
         from_secret: KUBECONFIG_B64
       DOCKER_USERNAME:
         from_secret: DOCKER_USERNAME
+      PG_USER:
+        from_secret: PG_USER
+      PG_PASSWORD:
+        from_secret: PG_PASSWORD
+      PG_DATABASE:
+        from_secret: PG_DATABASE
     commands:
       - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
       - export KUBECONFIG=/tmp/kubeconfig
@@ -245,7 +251,13 @@ steps:
       - echo "── Target cluster reachable ──"
 
       - kubectl apply -f src/phase2-final/k8s/namespace.yaml
-
+      - |
+        kubectl create secret generic todoapp-postgres-secret \
+          --namespace=todoapp \
+          --from-literal=POSTGRES_USER="$PG_USER" \
+          --from-literal=POSTGRES_PASSWORD="$PG_PASSWORD" \
+          --from-literal=POSTGRES_DB="$PG_DATABASE" \
+          --dry-run=client -o yaml | kubectl apply -f -
       - kubectl apply -f src/phase2-final/k8s/postgres-statefulset.yaml
       - kubectl rollout status statefulset/todoapp-postgres -n todoapp --timeout=120s
 
