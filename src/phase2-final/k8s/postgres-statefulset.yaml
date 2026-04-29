@@ -29,6 +29,7 @@ spec:
       containers:
         - name: postgres
           image: postgres:16-alpine
+          imagePullPolicy: Always
           ports:
             - containerPort: 5432
               name: postgres
@@ -39,8 +40,8 @@ spec:
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           resources:
-            requests: { cpu: 100m, memory: 256Mi }
-            limits:   { cpu: 1000m, memory: 1Gi }
+            requests: { cpu: 100m, memory: 256Mi, ephemeral-storage: 100Mi }
+            limits:   { cpu: 1000m, memory: 1Gi, ephemeral-storage: 500Mi }
 
           # ── Fix A: probe แยกกัน ──────────────────────────
           livenessProbe:
