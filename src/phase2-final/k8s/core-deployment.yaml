@@ -37,7 +37,7 @@ spec:
           # Docker Hub image — DOCKER_USERNAME is set as a Woodpecker secret.
           # Woodpecker will replace the tag on deploy.
           image: akawatmor/todoapp-core:latest
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
               name: http
