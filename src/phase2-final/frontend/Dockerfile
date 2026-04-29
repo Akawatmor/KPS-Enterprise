@@ -4,7 +4,8 @@
 FROM oven/bun:1.2-alpine AS deps
 WORKDIR /app
 COPY package.json bun.lock* ./
-RUN bun install --frozen-lockfile
+# RUN bun install --frozen-lockfile
+RUN bun install
 
 # ── builder: build Next.js standalone ────────────────────────────────────────
 FROM oven/bun:1.2-alpine AS builder
