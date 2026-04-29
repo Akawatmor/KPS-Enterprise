@@ -438,7 +438,9 @@ services:
           {"name":"todoapp-core-stable","port":8080,"weight":50},
           {"name":"todoapp-core-canary","port":8080,"weight":50}
         ]}}}'
-      - echo "📊 Traffic: 50/50" && sleep 60
+      - |
+        echo "📊 Traffic: 50/50" 
+      - sleep 60
 
       # Step 2: Update stable image to new version (rolling update)
       - |
@@ -632,8 +634,7 @@ services:
       content_type: text/html
       body: |
         <html>
-        <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-                     max-width:640px;margin:0 auto;padding:24px;color:#1f2937">
+        <body style="font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width: 640px;margin: 0 auto;padding: 24px;color: #1f2937">
           <div style="background:#f0fdf4;border-left:4px solid #22c55e;padding:16px;margin-bottom:24px">
             <h2 style="color:#15803d;margin:0">✅ Canary Promoted Successfully</h2>
             <p style="margin:8px 0 0;color:#166534">
@@ -642,11 +643,12 @@ services:
           </div>
 
           <h3>Pipeline Flow</h3>
-          <pre style="background:#f9fafb;padding:12px;border-radius:6px;font-size:12px;overflow:auto">
-preflight ✅ → quality ✅ → integration ✅ → build ✅ → sign ✅
-   → scan ✅ → snapshot ✅ → migrate-test ✅
-   → canary 10% ✅ → analyze ✅ → 50/50 ✅ → 100% ✅
-   → smoke ✅ → load ✅</pre>
+          <pre style="background: #f9fafb; padding: 12px; border-radius: 6px; font-size: 12px; overflow: auto">
+          preflight ✅ → quality ✅ → integration ✅ → build ✅ → sign ✅
+          → scan ✅ → snapshot ✅ → migrate-test ✅
+          → canary 10% ✅ → analyze ✅ → 50/50 ✅ → 100% ✅
+          → smoke ✅ → load ✅
+          </pre>
 
           <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:16px">
             <tr style="background:#f9fafb">
@@ -717,8 +719,7 @@ preflight ✅ → quality ✅ → integration ✅ → build ✅ → sign ✅
       content_type: text/html
       body: |
         <html>
-        <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-                     max-width:640px;margin:0 auto;padding:24px;color:#1f2937">
+        <body style="font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width: 640px;margin: 0 auto;padding: 24px;color: #1f2937">
           <div style="background:#fef2f2;border-left:4px solid #ef4444;padding:16px;margin-bottom:24px">
             <h2 style="color:#dc2626;margin:0">🚨 Auto-Rollback Executed</h2>
             <p style="margin:8px 0 0;color:#991b1b">
@@ -801,8 +802,7 @@ preflight ✅ → quality ✅ → integration ✅ → build ✅ → sign ✅
       content_type: text/html
       body: |
         <html>
-        <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-                     max-width:640px;margin:0 auto;padding:24px;color:#1f2937">
+        <body style="font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width: 640px;margin: 0 auto;padding: 24px;color: #1f2937">
           <div style="background:#fef2f2;border-left:4px solid #ef4444;padding:16px;margin-bottom:24px">
             <h2 style="color:#dc2626;margin:0">❌ Pipeline Failed (Pre-Deploy)</h2>
             <p style="margin:8px 0 0;color:#991b1b">
