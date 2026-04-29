@@ -438,7 +438,9 @@ services:
           {"name":"todoapp-core-stable","port":8080,"weight":50},
           {"name":"todoapp-core-canary","port":8080,"weight":50}
         ]}}}'
-      - echo "📊 Traffic: 50/50" && sleep 60
+      - |
+        echo "📊 Traffic: 50/50" 
+      - sleep 60
 
       # Step 2: Update stable image to new version (rolling update)
       - |
