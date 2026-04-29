@@ -178,10 +178,23 @@ steps:
       GOCACHE: /cache/go/build
     commands:
       - cd src/phase2-final/backend
-      # รอ postgres service พร้อม
-      - apt-get update && apt-get install -y postgresql-client
-      - until pg_isready -h postgres -U test; do sleep 1; done
-      - go test -tags=integration -v ./internal/repository/...
+      - apt-get update -qq && apt-get install -y -qq postgresql-client
+
+      # ── Wait for postgres service (timeout 60s) ──
+      - |
+        for i in $(seq 1 30); do
+          pg_isready -h postgres -U test && break
+          echo "Waiting postgres... $$i/30"
+          sleep 2
+        done
+
+      # ── Verify connectivity ──
+      - PGPASSWORD=test psql -h postgres -U test -d test -c "SELECT version();"
+
+      # ── Run integration tests against real Postgres ──
+      - echo "── Running integration tests on store/postgres adapter ──"
+      - go test -tags=integration -v -count=1 ./internal/store/...
+      - echo "✅ Integration tests passed"
 
 services:
   - name: postgres
