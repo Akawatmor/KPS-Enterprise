@@ -274,6 +274,11 @@ services:
     when:
       event: push
       branch: main
+      path:
+        include:
+          - "src/phase2-final/backend/**"
+          - "src/phase2-final/frontend/**"
+          - ".woodpecker.yml"
     environment:
       COSIGN_PASSWORD:
         from_secret: COSIGN_PASSWORD
@@ -298,6 +303,11 @@ services:
     when:
       event: push
       branch: main
+      path:
+        include:
+          - "src/phase2-final/backend/**"
+          - "src/phase2-final/frontend/**"
+          - ".woodpecker.yml"
     environment:
       DOCKER_USERNAME: { from_secret: DOCKER_USERNAME }
       DOCKER_PASSWORD: { from_secret: DOCKER_PASSWORD }
@@ -330,6 +340,11 @@ services:
     when:
       event: push
       branch: main
+      path:
+        include:
+          - "src/phase2-final/backend/**"
+          - "src/phase2-final/frontend/**"
+          - ".woodpecker.yml"
     environment:
       TRIVY_USERNAME: { from_secret: DOCKER_USERNAME }
       TRIVY_PASSWORD: { from_secret: DOCKER_PASSWORD }
