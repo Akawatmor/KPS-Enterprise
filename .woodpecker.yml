@@ -34,7 +34,7 @@ steps:
     when:
       event: [push, pull_request]
     commands:
-      - gitleaks detect --source . --verbose --redact --exit-code 1 --no-banner
+      - gitleaks detect --source . --config .gitleaks.toml --verbose --redact --exit-code 1 --no-banner
 
   # ── 0b. Dockerfile linting ───────────────────────────────────────────────
   - name: dockerfile-lint
