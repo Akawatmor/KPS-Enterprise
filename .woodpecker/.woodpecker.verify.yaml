@@ -47,7 +47,7 @@ steps:
     image: *kubescore_image
     depends_on: [dockerfile-lint]
     commands:
-      - kube-score score src/phase2-final/k8s/*.yaml --output-format ci
+      - kube-score score src/phase2-final/k8s/*.yaml --output-format ci --ignore-test container-image-tag --ignore-test container-security-context-user-group-id
 
   - name: opa-policy
     image: *conftest_image

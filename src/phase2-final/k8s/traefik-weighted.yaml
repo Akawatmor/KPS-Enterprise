@@ -9,7 +9,7 @@ metadata:
     track: canary
     app.kubernetes.io/part-of: todoapp
 spec:
-  replicas: 0
+  replicas: 1
   selector:
     matchLabels:
       app: todoapp-core
@@ -88,7 +88,7 @@ metadata:
     track: stable
     app.kubernetes.io/part-of: todoapp
 spec:
-  replicas: 2
+  replicas: 1
   strategy:
     type: RollingUpdate
     rollingUpdate:
