@@ -19,6 +19,8 @@ func NewMux(cfg config.Config, logger *log.Logger, core *service.Service) http.H
 	// Auth
 	mux.HandleFunc("GET /api/v1/auth/providers", h.ListAuthProviders)
 	mux.HandleFunc("POST /api/v1/auth/github/exchange", h.ExchangeGitHubCode)
+	mux.HandleFunc("POST /api/v1/auth/register", h.RegisterWithPassword)
+	mux.HandleFunc("POST /api/v1/auth/login", h.LoginWithPassword)
 	mux.HandleFunc("POST /api/v1/auth/session/refresh", h.RefreshAuthSession)
 	mux.HandleFunc("POST /api/v1/auth/session/logout", h.LogoutAuthSession)
 
@@ -37,6 +39,25 @@ func NewMux(cfg config.Config, logger *log.Logger, core *service.Service) http.H
 	mux.HandleFunc("GET /api/v1/reminders/rules", h.ListReminderRules)
 	mux.HandleFunc("PATCH /api/v1/reminders/rules/{id}", h.UpdateReminderRule)
 	mux.HandleFunc("POST /api/v1/reminders/dispatch", h.DispatchReminder)
+
+	// Admin (user management)
+	mux.HandleFunc("GET /api/v1/admin/users", h.AdminListUsers)
+	mux.HandleFunc("PATCH /api/v1/admin/users/{id}/role", h.AdminUpdateUserRole)
+	mux.HandleFunc("DELETE /api/v1/admin/users/{id}", h.AdminDeleteUser)
+
+	// Friends
+	mux.HandleFunc("POST /api/v1/friends/request", h.SendFriendRequest)
+	mux.HandleFunc("POST /api/v1/friends/{id}/accept", h.AcceptFriendRequest)
+	mux.HandleFunc("GET /api/v1/friends", h.ListFriends)
+
+	// Shared Boards
+	mux.HandleFunc("POST /api/v1/boards", h.CreateSharedBoard)
+	mux.HandleFunc("GET /api/v1/boards", h.ListUserBoards)
+	mux.HandleFunc("POST /api/v1/boards/{id}/members", h.AddBoardMember)
+
+	// Push Notifications
+	mux.HandleFunc("POST /api/v1/push/subscribe", h.SavePushSubscription)
+	mux.HandleFunc("GET /api/v1/push/subscriptions", h.GetPushSubscriptions)
 
 	return withCORS(mux, cfg.AllowedOrigin)
 }

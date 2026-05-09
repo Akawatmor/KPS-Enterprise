@@ -10,6 +10,7 @@ kubeconfig.yaml
 /backend/todoapp-core
 /frontend/.next/
 /frontend/out/
+/frontend/coverage/
 /frontend/node_modules/
 /frontend/.next/
 
