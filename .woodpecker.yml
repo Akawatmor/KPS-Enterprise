@@ -301,6 +301,8 @@ services:
     environment:
       DOCKER_USERNAME: { from_secret: DOCKER_USERNAME }
       DOCKER_PASSWORD: { from_secret: DOCKER_PASSWORD }
+      TRIVY_USERNAME: { from_secret: DOCKER_USERNAME }
+      TRIVY_PASSWORD: { from_secret: DOCKER_PASSWORD }
     commands:
       - apk add --no-cache curl ca-certificates bash
       # Install cosign
