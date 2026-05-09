@@ -207,6 +207,16 @@ services:
       POSTGRES_PASSWORD: test
       POSTGRES_DB: test
 
+  - name: pg-test
+    image: postgres:16-alpine
+    when:
+      event: push
+      branch: main
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: test
+
   # ╔═════════════════════════════════════════════════════════════════════════╗
   # ║  STAGE 3 — BUILD, PUSH, SBOM, SIGN  (parallel; main only)               ║
   # ╚═════════════════════════════════════════════════════════════════════════╝
@@ -265,8 +275,6 @@ services:
       event: push
       branch: main
     environment:
-      COSIGN_KEY:
-        from_secret: COSIGN_PRIVATE_KEY
       COSIGN_PASSWORD:
         from_secret: COSIGN_PASSWORD
       DOCKER_USERNAME:
@@ -279,10 +287,9 @@ services:
       - chmod +x /usr/local/bin/cosign
       - cosign version
       - echo "$DOCKER_PASSWORD" | cosign login -u "$DOCKER_USERNAME" --password-stdin docker.io
-      - echo "$COSIGN_KEY" > /tmp/cosign.key
-      - cosign sign --yes --key /tmp/cosign.key akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7}
-      - cosign sign --yes --key /tmp/cosign.key akawatmor/todoapp-web:${CI_COMMIT_SHA:0:7}
-      - rm -f /tmp/cosign.key
+      # cosign.key is committed (encrypted) — COSIGN_PASSWORD env var decrypts it
+      - cosign sign --yes --key cosign.key akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7}
+      - cosign sign --yes --key cosign.key akawatmor/todoapp-web:${CI_COMMIT_SHA:0:7}
       - echo "✅ Images signed"
 
   - name: sbom-attest
@@ -292,8 +299,6 @@ services:
       event: push
       branch: main
     environment:
-      COSIGN_KEY:      { from_secret: COSIGN_PRIVATE_KEY }
-      COSIGN_PASSWORD: { from_secret: COSIGN_PASSWORD }
       DOCKER_USERNAME: { from_secret: DOCKER_USERNAME }
       DOCKER_PASSWORD: { from_secret: DOCKER_PASSWORD }
     commands:
@@ -303,15 +308,14 @@ services:
       - chmod +x /usr/local/bin/cosign
       # Install trivy
       - curl -sSL https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_Linux-64bit.tar.gz | tar xz -C /usr/local/bin/
-      # Login
+      # Login (needed to push SBOM attachment to registry)
       - echo "$DOCKER_PASSWORD" | cosign login -u "$DOCKER_USERNAME" --password-stdin docker.io
-      - echo "$COSIGN_KEY" > /tmp/cosign.key
-      # Generate + attach SBOM (2 steps, no process substitution)
+      # Generate + attach SBOM — attach sbom needs no private key
       - trivy image --format cyclonedx --output /tmp/sbom-core.json akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7}
       - cosign attach sbom --sbom /tmp/sbom-core.json akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7}
       - trivy image --format cyclonedx --output /tmp/sbom-web.json akawatmor/todoapp-web:${CI_COMMIT_SHA:0:7}
       - cosign attach sbom --sbom /tmp/sbom-web.json akawatmor/todoapp-web:${CI_COMMIT_SHA:0:7}
-      - rm -f /tmp/cosign.key /tmp/sbom-*.json
+      - rm -f /tmp/sbom-*.json
       - echo "✅ SBOM attached to both images"
 
   # ╔═════════════════════════════════════════════════════════════════════════╗
@@ -373,13 +377,6 @@ services:
     when:
       event: push
       branch: main
-    services:
-      - name: pg-test
-        image: postgres:16-alpine
-        environment:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: test
     commands:
       - go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
       - export DB="postgres://test:test@pg-test:5432/test?sslmode=disable"
@@ -540,7 +537,7 @@ services:
 
   - name: auto-rollback
     image: *kubectl_image
-    depends_on: [canary-analyze, promote-stable]
+    depends_on: [canary-analyze]
     when:
       event: push
       branch: main
@@ -838,7 +835,7 @@ services:
       - dockerfile-lint
       - k8s-lint
       - opa-policy
-      - api-compat-check
+      - api-contract-check
       - quality-backend
       - quality-frontend
       - integration-test
