@@ -36,4 +36,4 @@
 **.eslintignore
 **.prettierignore
 **.stylelintignore
-cosign.key
+# cosign.key is intentionally committed (encrypted with COSIGN_PASSWORD)

@@ -1,0 +1,3 @@
+# cosign.key is an encrypted private key (password-protected via COSIGN_PASSWORD secret).
+# It is intentionally committed for CI signing workflow. Safe to ignore gitleaks finding.
+d7c5617eee0c0ae00fc64d0425b6e6c56929578a:cosign.key:private-key:1

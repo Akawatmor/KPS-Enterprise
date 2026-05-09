@@ -1,0 +1,7 @@
+title = "KPS-Enterprise Gitleaks Config"
+
+[allowlist]
+  description = "cosign.key is an AES-256 encrypted private key protected by COSIGN_PASSWORD secret — not a real leak"
+  paths = [
+    '''(?i)cosign\.key''',
+  ]
