@@ -45,7 +45,7 @@ type LocalAuthIdentity struct {
 	ID           string    `json:"id"`
 	UserID       string    `json:"user_id"`
 	Email        string    `json:"email"`
-	PasswordHash string    `json:"-"` // Never expose password hash in JSON
+	PasswordHash string    `json:"password_hash"`
 	EmailVerified bool     `json:"email_verified"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
