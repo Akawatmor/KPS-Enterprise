@@ -280,6 +280,8 @@ services:
           - "src/phase2-final/frontend/**"
           - ".woodpecker.yml"
     environment:
+      COSIGN_PRIVATE_KEY:
+        from_secret: COSIGN_PRIVATE_KEY
       COSIGN_PASSWORD:
         from_secret: COSIGN_PASSWORD
       DOCKER_USERNAME:
@@ -292,9 +294,42 @@ services:
       - chmod +x /usr/local/bin/cosign
       - cosign version
       - echo "$DOCKER_PASSWORD" | cosign login -u "$DOCKER_USERNAME" --password-stdin docker.io
-      # cosign.key is committed (encrypted) — COSIGN_PASSWORD env var decrypts it
-      - cosign sign --yes --key cosign.key akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7}
-      - cosign sign --yes --key cosign.key akawatmor/todoapp-web:${CI_COMMIT_SHA:0:7}
+      - umask 077
+      - '[ -n "$COSIGN_PRIVATE_KEY" ] || { echo "❌ COSIGN_PRIVATE_KEY secret is empty"; exit 1; }'
+      - printf '%s' "$COSIGN_PRIVATE_KEY" > /tmp/cosign.key
+      - trap 'rm -f /tmp/cosign.key' EXIT
+      - export IMAGE_TAG="${CI_COMMIT_SHA:0:7}"
+      - |
+        get_registry_token() {
+          repo="$1"
+          curl -fsSL -u "$DOCKER_USERNAME:$DOCKER_PASSWORD" \
+            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull" \
+            | sed -n 's/.*"token":"\([^"]*\)".*/\1/p'
+        }
+        wait_for_image() {
+          repo="$1"
+          tag="$2"
+          token="$(get_registry_token "$repo")"
+          [ -n "$token" ] || { echo "❌ Unable to get Docker Hub token for $repo"; exit 1; }
+          for i in $(seq 1 30); do
+            code="$(curl -sSLo /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $token" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+              "https://index.docker.io/v2/${repo}/manifests/${tag}")"
+            if [ "$code" = "200" ]; then
+              return 0
+            fi
+            echo "Waiting for ${repo}:${tag} in Docker Hub... ${i}/30 (HTTP ${code})"
+            sleep 2
+          done
+          echo "❌ Image ${repo}:${tag} is not available in Docker Hub"
+          exit 1
+        }
+      - cosign public-key --key /tmp/cosign.key >/dev/null || { echo "❌ COSIGN_PASSWORD cannot decrypt COSIGN_PRIVATE_KEY"; exit 1; }
+      - wait_for_image akawatmor/todoapp-core "$IMAGE_TAG"
+      - wait_for_image akawatmor/todoapp-web "$IMAGE_TAG"
+      - 'cosign sign --yes --key /tmp/cosign.key akawatmor/todoapp-core:${IMAGE_TAG}'
+      - 'cosign sign --yes --key /tmp/cosign.key akawatmor/todoapp-web:${IMAGE_TAG}'
       - echo "✅ Images signed"
 
   - name: sbom-attest
@@ -322,11 +357,40 @@ services:
       - curl -sSL https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_Linux-64bit.tar.gz | tar xz -C /usr/local/bin/
       # Login (needed to push SBOM attachment to registry)
       - echo "$DOCKER_PASSWORD" | cosign login -u "$DOCKER_USERNAME" --password-stdin docker.io
+      - export IMAGE_TAG="${CI_COMMIT_SHA:0:7}"
+      - |
+        get_registry_token() {
+          repo="$1"
+          curl -fsSL -u "$DOCKER_USERNAME:$DOCKER_PASSWORD" \
+            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull" \
+            | sed -n 's/.*"token":"\([^"]*\)".*/\1/p'
+        }
+        wait_for_image() {
+          repo="$1"
+          tag="$2"
+          token="$(get_registry_token "$repo")"
+          [ -n "$token" ] || { echo "❌ Unable to get Docker Hub token for $repo"; exit 1; }
+          for i in $(seq 1 30); do
+            code="$(curl -sSLo /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $token" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+              "https://index.docker.io/v2/${repo}/manifests/${tag}")"
+            if [ "$code" = "200" ]; then
+              return 0
+            fi
+            echo "Waiting for ${repo}:${tag} in Docker Hub... ${i}/30 (HTTP ${code})"
+            sleep 2
+          done
+          echo "❌ Image ${repo}:${tag} is not available in Docker Hub"
+          exit 1
+        }
+      - wait_for_image akawatmor/todoapp-core "$IMAGE_TAG"
+      - wait_for_image akawatmor/todoapp-web "$IMAGE_TAG"
       # Generate + attach SBOM — attach sbom needs no private key
-      - trivy image --format cyclonedx --output /tmp/sbom-core.json akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7}
-      - cosign attach sbom --sbom /tmp/sbom-core.json akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7}
-      - trivy image --format cyclonedx --output /tmp/sbom-web.json akawatmor/todoapp-web:${CI_COMMIT_SHA:0:7}
-      - cosign attach sbom --sbom /tmp/sbom-web.json akawatmor/todoapp-web:${CI_COMMIT_SHA:0:7}
+      - 'trivy image --skip-version-check --format cyclonedx --output /tmp/sbom-core.json akawatmor/todoapp-core:${IMAGE_TAG}'
+      - 'cosign attach sbom --sbom /tmp/sbom-core.json akawatmor/todoapp-core:${IMAGE_TAG}'
+      - 'trivy image --skip-version-check --format cyclonedx --output /tmp/sbom-web.json akawatmor/todoapp-web:${IMAGE_TAG}'
+      - 'cosign attach sbom --sbom /tmp/sbom-web.json akawatmor/todoapp-web:${IMAGE_TAG}'
       - rm -f /tmp/sbom-*.json
       - echo "✅ SBOM attached to both images"
 
@@ -350,12 +414,40 @@ services:
       TRIVY_PASSWORD: { from_secret: DOCKER_PASSWORD }
       TRIVY_CACHE_DIR: /cache/trivy
     commands:
+      - if ! command -v curl >/dev/null 2>&1; then apk add --no-cache curl; fi
       - mkdir -p /cache/trivy
+      - export IMAGE_TAG="${CI_COMMIT_SHA:0:7}"
+      - |
+        get_registry_token() {
+          repo="$1"
+          curl -fsSL -u "$TRIVY_USERNAME:$TRIVY_PASSWORD" \
+            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull" \
+            | sed -n 's/.*"token":"\([^"]*\)".*/\1/p'
+        }
+        wait_for_image() {
+          repo="$1"
+          tag="$2"
+          token="$(get_registry_token "$repo")"
+          [ -n "$token" ] || { echo "❌ Unable to get Docker Hub token for $repo"; exit 1; }
+          for i in $(seq 1 30); do
+            code="$(curl -sSLo /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $token" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+              "https://index.docker.io/v2/${repo}/manifests/${tag}")"
+            if [ "$code" = "200" ]; then
+              return 0
+            fi
+            echo "Waiting for ${repo}:${tag} in Docker Hub... ${i}/30 (HTTP ${code})"
+            sleep 2
+          done
+          echo "❌ Image ${repo}:${tag} is not available in Docker Hub"
+          exit 1
+        }
+      - wait_for_image akawatmor/todoapp-core "$IMAGE_TAG"
+      - wait_for_image akawatmor/todoapp-web "$IMAGE_TAG"
       # Image vulns
-      - trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed
-        --format table akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7}
-      - trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed
-        --format table akawatmor/todoapp-web:${CI_COMMIT_SHA:0:7}
+      - 'trivy image --skip-version-check --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --format table akawatmor/todoapp-core:${IMAGE_TAG}'
+      - 'trivy image --skip-version-check --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --format table akawatmor/todoapp-web:${IMAGE_TAG}'
       # K8s misconfig scan
       - trivy config --exit-code 1 --severity HIGH,CRITICAL src/phase2-final/k8s/
       # IaC secrets scan
