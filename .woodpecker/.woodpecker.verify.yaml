@@ -16,6 +16,7 @@ variables:
   - &oasdiff_image "tufin/oasdiff:latest"
   - &email_image "drillster/drone-email"
 
+
 services:
   - name: postgres
     image: postgres:16-alpine
