@@ -128,14 +128,14 @@ steps:
       - |
         COV=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
 
-        echo "Total coverage: ${COV}% (minimum: ${MIN_COVERAGE}%)"
+        echo "Total coverage: $${COV}% (minimum: $${MIN_COVERAGE}%)"
 
-        awk -v c="$COV" -v m="$MIN_COVERAGE" 'BEGIN { exit !(c >= m) }' || {
-          echo "❌ Coverage ${COV}% below minimum ${MIN_COVERAGE}%"
+        awk -v c="$$COV" -v m="$$MIN_COVERAGE" 'BEGIN { exit !(c >= m) }' || {
+          echo "❌ Coverage $${COV}% below minimum $${MIN_COVERAGE}%"
           exit 1
         }
 
-        echo "✅ Coverage ${COV}% meets minimum ${MIN_COVERAGE}%"
+        echo "✅ Coverage $${COV}% meets minimum $${MIN_COVERAGE}%"
 
       # ── Install tools only if not cached ──
       - echo "══ gosec ══"
