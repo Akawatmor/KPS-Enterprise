@@ -182,6 +182,7 @@ func (s *Service) ExchangeOAuthCode(ctx context.Context, providerName, code stri
 			ID:          s.nextID("usr"),
 			Email:       profile.Email,
 			DisplayName: profile.DisplayName,
+			Role:        model.RoleUser, // Default role
 			Locale:      "th",
 			Theme:       "light",
 			CreatedAt:   now,
@@ -682,4 +683,465 @@ func (s *Service) ProcessDueNaggerSchedules(ctx context.Context) (int, error) {
 		count++
 	}
 	return count, nil
+}
+
+// ── Password Authentication ───────────────────────────────────────────────────
+
+func (s *Service) RegisterWithPassword(ctx context.Context, email, password, displayName string) (SessionBundle, error) {
+	if err := auth.ValidateEmail(email); err != nil {
+		return SessionBundle{}, err
+	}
+	if err := auth.ValidatePassword(password); err != nil {
+		return SessionBundle{}, err
+	}
+
+	// Check if email already exists
+	identities, err := listEntities[model.LocalAuthIdentity](ctx, s.store, store.CollectionLocalAuthIdentities)
+	if err != nil {
+		return SessionBundle{}, err
+	}
+	for _, identity := range identities {
+		if strings.EqualFold(identity.Email, email) {
+			return SessionBundle{}, fmt.Errorf("email already registered")
+		}
+	}
+
+	// Hash password
+	passwordHash, err := auth.HashPassword(password)
+	if err != nil {
+		return SessionBundle{}, fmt.Errorf("password hashing failed: %w", err)
+	}
+
+	now := s.clock()
+	user := model.User{
+		ID:          s.nextID("usr"),
+		Email:       email,
+		DisplayName: displayName,
+		Role:        model.RoleUser,
+		Locale:      "th",
+		Theme:       "light",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	identity := model.LocalAuthIdentity{
+		ID:            s.nextID("lid"),
+		UserID:        user.ID,
+		Email:         email,
+		PasswordHash:  passwordHash,
+		EmailVerified: false,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+
+	if err := saveEntity(ctx, s.store, store.CollectionUsers, user.ID, user); err != nil {
+		return SessionBundle{}, err
+	}
+	if err := saveEntity(ctx, s.store, store.CollectionLocalAuthIdentities, identity.ID, identity); err != nil {
+		return SessionBundle{}, err
+	}
+
+	session, err := s.createSession(ctx, user.ID, model.ProviderLocal)
+	if err != nil {
+		return SessionBundle{}, err
+	}
+	return SessionBundle{User: user, Session: session}, nil
+}
+
+func (s *Service) LoginWithPassword(ctx context.Context, email, password string) (SessionBundle, error) {
+	identities, err := listEntities[model.LocalAuthIdentity](ctx, s.store, store.CollectionLocalAuthIdentities)
+	if err != nil {
+		return SessionBundle{}, err
+	}
+
+	var identity *model.LocalAuthIdentity
+	for idx := range identities {
+		if strings.EqualFold(identities[idx].Email, email) {
+			identity = &identities[idx]
+			break
+		}
+	}
+
+	if identity == nil {
+		return SessionBundle{}, fmt.Errorf("invalid email or password")
+	}
+
+	if err := auth.ComparePassword(identity.PasswordHash, password); err != nil {
+		return SessionBundle{}, fmt.Errorf("invalid email or password")
+	}
+
+	user, found, err := loadEntity[model.User](ctx, s.store, store.CollectionUsers, identity.UserID)
+	if err != nil {
+		return SessionBundle{}, err
+	}
+	if !found {
+		return SessionBundle{}, fmt.Errorf("user account not found")
+	}
+
+	session, err := s.createSession(ctx, user.ID, model.ProviderLocal)
+	if err != nil {
+		return SessionBundle{}, err
+	}
+	return SessionBundle{User: user, Session: session}, nil
+}
+
+// ── User Management ───────────────────────────────────────────────────────────
+
+func (s *Service) GetUserByID(ctx context.Context, userID string) (model.User, error) {
+	user, found, err := loadEntity[model.User](ctx, s.store, store.CollectionUsers, userID)
+	if err != nil {
+		return model.User{}, err
+	}
+	if !found {
+		return model.User{}, fmt.Errorf("user not found")
+	}
+	return user, nil
+}
+
+func (s *Service) ListAllUsers(ctx context.Context, requestingUserID string) ([]model.User, error) {
+	requester, err := s.GetUserByID(ctx, requestingUserID)
+	if err != nil {
+		return nil, err
+	}
+	if requester.Role != model.RoleAdmin {
+		return nil, fmt.Errorf("forbidden: admin access required")
+	}
+	return listEntities[model.User](ctx, s.store, store.CollectionUsers)
+}
+
+func (s *Service) UpdateUserRole(ctx context.Context, targetUserID, newRole, requestingUserID string) (model.User, error) {
+	requester, err := s.GetUserByID(ctx, requestingUserID)
+	if err != nil {
+		return model.User{}, err
+	}
+	if requester.Role != model.RoleAdmin {
+		return model.User{}, fmt.Errorf("forbidden: admin access required")
+	}
+
+	if newRole != model.RoleUser && newRole != model.RoleAdmin {
+		return model.User{}, fmt.Errorf("invalid role: must be 'user' or 'admin'")
+	}
+
+	user, found, err := loadEntity[model.User](ctx, s.store, store.CollectionUsers, targetUserID)
+	if err != nil {
+		return model.User{}, err
+	}
+	if !found {
+		return model.User{}, fmt.Errorf("user not found")
+	}
+
+	user.Role = newRole
+	user.UpdatedAt = s.clock()
+
+	if err := saveEntity(ctx, s.store, store.CollectionUsers, user.ID, user); err != nil {
+		return model.User{}, err
+	}
+	return user, nil
+}
+
+func (s *Service) DeleteUser(ctx context.Context, targetUserID, requestingUserID string) error {
+	requester, err := s.GetUserByID(ctx, requestingUserID)
+	if err != nil {
+		return err
+	}
+	if requester.Role != model.RoleAdmin {
+		return fmt.Errorf("forbidden: admin access required")
+	}
+
+	// Prevent admin from deleting themselves
+	if targetUserID == requestingUserID {
+		return fmt.Errorf("cannot delete your own account")
+	}
+
+	// Delete user tasks
+	tasks, err := listEntities[model.Task](ctx, s.store, store.CollectionTasks)
+	if err != nil {
+		return err
+	}
+	for _, task := range tasks {
+		if task.UserID == targetUserID {
+			if err := s.store.Delete(ctx, store.CollectionTasks, task.ID); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Delete sessions
+	sessions, err := listEntities[model.Session](ctx, s.store, store.CollectionSessions)
+	if err != nil {
+		return err
+	}
+	for _, session := range sessions {
+		if session.UserID == targetUserID {
+			if err := s.store.Delete(ctx, store.CollectionSessions, session.ID); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Delete auth identities
+	localIds, _ := listEntities[model.LocalAuthIdentity](ctx, s.store, store.CollectionLocalAuthIdentities)
+	for _, id := range localIds {
+		if id.UserID == targetUserID {
+			_ = s.store.Delete(ctx, store.CollectionLocalAuthIdentities, id.ID)
+		}
+	}
+	oauthIds, _ := listEntities[model.OAuthIdentity](ctx, s.store, store.CollectionOAuthIdentities)
+	for _, id := range oauthIds {
+		if id.UserID == targetUserID {
+			_ = s.store.Delete(ctx, store.CollectionOAuthIdentities, id.ID)
+		}
+	}
+
+	return s.store.Delete(ctx, store.CollectionUsers, targetUserID)
+}
+
+// ── Friends ───────────────────────────────────────────────────────────────────
+
+func (s *Service) SendFriendRequest(ctx context.Context, userID, friendID string) (model.Friend, error) {
+	if userID == friendID {
+		return model.Friend{}, fmt.Errorf("cannot add yourself as friend")
+	}
+
+	// Check if friend user exists
+	_, err := s.GetUserByID(ctx, friendID)
+	if err != nil {
+		return model.Friend{}, fmt.Errorf("friend user not found")
+	}
+
+	// Check if friendship already exists
+	friends, err := listEntities[model.Friend](ctx, s.store, store.CollectionFriends)
+	if err != nil {
+		return model.Friend{}, err
+	}
+	for _, f := range friends {
+		if (f.UserID == userID && f.FriendID == friendID) || (f.UserID == friendID && f.FriendID == userID) {
+			return model.Friend{}, fmt.Errorf("friendship already exists or pending")
+		}
+	}
+
+	now := s.clock()
+	friend := model.Friend{
+		ID:        s.nextID("frd"),
+		UserID:    userID,
+		FriendID:  friendID,
+		Status:    "pending",
+		CreatedAt: now,
+	}
+
+	if err := saveEntity(ctx, s.store, store.CollectionFriends, friend.ID, friend); err != nil {
+		return model.Friend{}, err
+	}
+	return friend, nil
+}
+
+func (s *Service) AcceptFriendRequest(ctx context.Context, friendshipID, userID string) (model.Friend, error) {
+	friend, found, err := loadEntity[model.Friend](ctx, s.store, store.CollectionFriends, friendshipID)
+	if err != nil {
+		return model.Friend{}, err
+	}
+	if !found {
+		return model.Friend{}, fmt.Errorf("friend request not found")
+	}
+
+	// Only the person who was invited can accept
+	if friend.FriendID != userID {
+		return model.Friend{}, fmt.Errorf("forbidden")
+	}
+
+	if friend.Status != "pending" {
+		return model.Friend{}, fmt.Errorf("request already processed")
+	}
+
+	now := s.clock()
+	friend.Status = "accepted"
+	friend.AcceptedAt = &now
+
+	if err := saveEntity(ctx, s.store, store.CollectionFriends, friend.ID, friend); err != nil {
+		return model.Friend{}, err
+	}
+	return friend, nil
+}
+
+func (s *Service) ListFriends(ctx context.Context, userID string) ([]model.User, error) {
+	friends, err := listEntities[model.Friend](ctx, s.store, store.CollectionFriends)
+	if err != nil {
+		return nil, err
+	}
+
+	users, err := listEntities[model.User](ctx, s.store, store.CollectionUsers)
+	if err != nil {
+		return nil, err
+	}
+
+	userMap := make(map[string]model.User)
+	for _, user := range users {
+		userMap[user.ID] = user
+	}
+
+	friendList := make([]model.User, 0)
+	for _, f := range friends {
+		if f.Status != "accepted" {
+			continue
+		}
+		if f.UserID == userID {
+			if user, ok := userMap[f.FriendID]; ok {
+				friendList = append(friendList, user)
+			}
+		} else if f.FriendID == userID {
+			if user, ok := userMap[f.UserID]; ok {
+				friendList = append(friendList, user)
+			}
+		}
+	}
+
+	return friendList, nil
+}
+
+// ── Shared Boards ─────────────────────────────────────────────────────────────
+
+func (s *Service) CreateSharedBoard(ctx context.Context, name, description, ownerID string) (model.SharedBoard, error) {
+	now := s.clock()
+	board := model.SharedBoard{
+		ID:          s.nextID("brd"),
+		Name:        name,
+		Description: description,
+		OwnerID:     ownerID,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	if err := saveEntity(ctx, s.store, store.CollectionSharedBoards, board.ID, board); err != nil {
+		return model.SharedBoard{}, err
+	}
+
+	// Add owner as member
+	member := model.BoardMember{
+		ID:        s.nextID("bmb"),
+		BoardID:   board.ID,
+		UserID:    ownerID,
+		Role:      "owner",
+		CreatedAt: now,
+	}
+	if err := saveEntity(ctx, s.store, store.CollectionBoardMembers, member.ID, member); err != nil {
+		return model.SharedBoard{}, err
+	}
+
+	return board, nil
+}
+
+func (s *Service) AddBoardMember(ctx context.Context, boardID, userID, memberRole, requestingUserID string) (model.BoardMember, error) {
+	// Check if requester is board owner
+	members, err := listEntities[model.BoardMember](ctx, s.store, store.CollectionBoardMembers)
+	if err != nil {
+		return model.BoardMember{}, err
+	}
+
+	isOwner := false
+	for _, m := range members {
+		if m.BoardID == boardID && m.UserID == requestingUserID && m.Role == "owner" {
+			isOwner = true
+			break
+		}
+	}
+
+	if !isOwner {
+		return model.BoardMember{}, fmt.Errorf("forbidden: only board owner can add members")
+	}
+
+	// Check if user already member
+	for _, m := range members {
+		if m.BoardID == boardID && m.UserID == userID {
+			return model.BoardMember{}, fmt.Errorf("user is already a member")
+		}
+	}
+
+	now := s.clock()
+	member := model.BoardMember{
+		ID:        s.nextID("bmb"),
+		BoardID:   boardID,
+		UserID:    userID,
+		Role:      memberRole,
+		CreatedAt: now,
+	}
+
+	if err := saveEntity(ctx, s.store, store.CollectionBoardMembers, member.ID, member); err != nil {
+		return model.BoardMember{}, err
+	}
+	return member, nil
+}
+
+func (s *Service) ListUserBoards(ctx context.Context, userID string) ([]model.SharedBoard, error) {
+	members, err := listEntities[model.BoardMember](ctx, s.store, store.CollectionBoardMembers)
+	if err != nil {
+		return nil, err
+	}
+
+	boardIDs := make(map[string]bool)
+	for _, m := range members {
+		if m.UserID == userID {
+			boardIDs[m.BoardID] = true
+		}
+	}
+
+	boards, err := listEntities[model.SharedBoard](ctx, s.store, store.CollectionSharedBoards)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]model.SharedBoard, 0)
+	for _, board := range boards {
+		if boardIDs[board.ID] {
+			result = append(result, board)
+		}
+	}
+
+	return result, nil
+}
+
+// ── Push Notifications ────────────────────────────────────────────────────────
+
+func (s *Service) SavePushSubscription(ctx context.Context, userID, endpoint, p256dh, authSecret string) (model.PushSubscription, error) {
+	// Check if subscription already exists
+	subscriptions, err := listEntities[model.PushSubscription](ctx, s.store, store.CollectionPushSubscriptions)
+	if err != nil {
+		return model.PushSubscription{}, err
+	}
+
+	for _, sub := range subscriptions {
+		if sub.UserID == userID && sub.Endpoint == endpoint {
+			// Already exists
+			return sub, nil
+		}
+	}
+
+	now := s.clock()
+	subscription := model.PushSubscription{
+		ID:        s.nextID("psb"),
+		UserID:    userID,
+		Endpoint:  endpoint,
+		P256dh:    p256dh,
+		Auth:      authSecret,
+		CreatedAt: now,
+	}
+
+	if err := saveEntity(ctx, s.store, store.CollectionPushSubscriptions, subscription.ID, subscription); err != nil {
+		return model.PushSubscription{}, err
+	}
+	return subscription, nil
+}
+
+func (s *Service) GetUserPushSubscriptions(ctx context.Context, userID string) ([]model.PushSubscription, error) {
+	subscriptions, err := listEntities[model.PushSubscription](ctx, s.store, store.CollectionPushSubscriptions)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]model.PushSubscription, 0)
+	for _, sub := range subscriptions {
+		if sub.UserID == userID {
+			result = append(result, sub)
+		}
+	}
+	return result, nil
 }

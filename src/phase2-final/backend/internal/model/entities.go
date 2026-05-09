@@ -8,12 +8,21 @@ const (
 
 	ScheduleStatusActive    = "active"
 	ScheduleStatusCompleted = "completed"
+
+	// User Roles
+	RoleUser  = "user"
+	RoleAdmin = "admin"
+
+	// Auth Providers
+	ProviderLocal  = "local"
+	ProviderGitHub = "github"
 )
 
 type User struct {
 	ID          string    `json:"id"`
 	Email       string    `json:"email"`
 	DisplayName string    `json:"display_name"`
+	Role        string    `json:"role"` // user, admin
 	Locale      string    `json:"locale"`
 	Theme       string    `json:"theme"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -29,6 +38,17 @@ type OAuthIdentity struct {
 	DisplayName    string    `json:"display_name"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// LocalAuthIdentity stores password-based authentication credentials
+type LocalAuthIdentity struct {
+	ID           string    `json:"id"`
+	UserID       string    `json:"user_id"`
+	Email        string    `json:"email"`
+	PasswordHash string    `json:"-"` // Never expose password hash in JSON
+	EmailVerified bool     `json:"email_verified"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type Session struct {
@@ -120,4 +140,43 @@ type NotificationLog struct {
 	IdempotencyKey string    `json:"idempotency_key"`
 	Status         string    `json:"status"`
 	CreatedAt      time.Time `json:"created_at"`
+}
+
+// Friend represents a friendship relationship between two users
+type Friend struct {
+	ID         string    `json:"id"`
+	UserID     string    `json:"user_id"`     // User who initiated
+	FriendID   string    `json:"friend_id"`   // User who was added
+	Status     string    `json:"status"`      // pending, accepted, rejected
+	CreatedAt  time.Time `json:"created_at"`
+	AcceptedAt *time.Time `json:"accepted_at,omitempty"`
+}
+
+// SharedBoard represents a Kanban board shared among friends
+type SharedBoard struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	OwnerID     string    `json:"owner_id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// BoardMember represents users who have access to a shared board
+type BoardMember struct {
+	ID        string    `json:"id"`
+	BoardID   string    `json:"board_id"`
+	UserID    string    `json:"user_id"`
+	Role      string    `json:"role"` // owner, editor, viewer
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// PushSubscription stores Web Push API subscription data
+type PushSubscription struct {
+	ID       string    `json:"id"`
+	UserID   string    `json:"user_id"`
+	Endpoint string    `json:"endpoint"`
+	P256dh   string    `json:"p256dh"`   // Public key
+	Auth     string    `json:"auth"`     // Auth secret
+	CreatedAt time.Time `json:"created_at"`
 }

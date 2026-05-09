@@ -91,7 +91,7 @@ func (h *Handler) Meta(w http.ResponseWriter, r *http.Request) {
 		"backend":          "Go",
 		"data_backend":     h.cfg.DataBackend,
 		"auth_providers":   providers,
-		"features":         []string{"tasks", "subtasks", "reminders", "calendar-view"},
+		"features":         []string{"tasks", "subtasks", "reminders", "calendar-view", "friends", "shared-boards", "pwa", "push-notifications", "admin-panel"},
 		"infra":            "K3s 3-node (1 master + 2 workers) + Woodpecker CI/CD + Docker Hub",
 	})
 }
@@ -502,4 +502,234 @@ func writeJSON(w http.ResponseWriter, statusCode int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+// ── Password Auth ─────────────────────────────────────────────────────────────
+
+func (h *Handler) RegisterWithPassword(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email       string `json:"email"`
+		Password    string `json:"password"`
+		DisplayName string `json:"display_name"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	bundle, err := h.core.RegisterWithPassword(r.Context(), req.Email, req.Password, req.DisplayName)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, bundle)
+}
+
+func (h *Handler) LoginWithPassword(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	bundle, err := h.core.LoginWithPassword(r.Context(), req.Email, req.Password)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, bundle)
+}
+
+// ── Admin ─────────────────────────────────────────────────────────────────────
+
+func (h *Handler) AdminListUsers(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.resolveUserID(w, r)
+	if !ok {
+		return
+	}
+	users, err := h.core.ListAllUsers(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": users})
+}
+
+func (h *Handler) AdminUpdateUserRole(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.resolveUserID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Role string `json:"role"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	targetID := r.PathValue("id")
+	user, err := h.core.UpdateUserRole(r.Context(), targetID, req.Role, userID)
+	if err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
+}
+
+func (h *Handler) AdminDeleteUser(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.resolveUserID(w, r)
+	if !ok {
+		return
+	}
+	targetID := r.PathValue("id")
+	if err := h.core.DeleteUser(r.Context(), targetID, userID); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
+}
+
+// ── Friends ───────────────────────────────────────────────────────────────────
+
+func (h *Handler) SendFriendRequest(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.resolveUserID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		FriendID string `json:"friend_id"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	friend, err := h.core.SendFriendRequest(r.Context(), userID, req.FriendID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, friend)
+}
+
+func (h *Handler) AcceptFriendRequest(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.resolveUserID(w, r)
+	if !ok {
+		return
+	}
+	friendshipID := r.PathValue("id")
+	friend, err := h.core.AcceptFriendRequest(r.Context(), friendshipID, userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, friend)
+}
+
+func (h *Handler) ListFriends(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.resolveUserID(w, r)
+	if !ok {
+		return
+	}
+	friends, err := h.core.ListFriends(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": friends})
+}
+
+// ── Shared Boards ─────────────────────────────────────────────────────────────
+
+func (h *Handler) CreateSharedBoard(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.resolveUserID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	board, err := h.core.CreateSharedBoard(r.Context(), req.Name, req.Description, userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, board)
+}
+
+func (h *Handler) ListUserBoards(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.resolveUserID(w, r)
+	if !ok {
+		return
+	}
+	boards, err := h.core.ListUserBoards(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": boards})
+}
+
+func (h *Handler) AddBoardMember(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.resolveUserID(w, r)
+	if !ok {
+		return
+	}
+	boardID := r.PathValue("id")
+	var req struct {
+		UserID string `json:"user_id"`
+		Role   string `json:"role"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	member, err := h.core.AddBoardMember(r.Context(), boardID, req.UserID, req.Role, userID)
+	if err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, member)
+}
+
+// ── Push Subscriptions ────────────────────────────────────────────────────────
+
+func (h *Handler) SavePushSubscription(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.resolveUserID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Endpoint string `json:"endpoint"`
+		P256dh   string `json:"p256dh"`
+		Auth     string `json:"auth"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	subscription, err := h.core.SavePushSubscription(r.Context(), userID, req.Endpoint, req.P256dh, req.Auth)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, subscription)
+}
+
+func (h *Handler) GetPushSubscriptions(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.resolveUserID(w, r)
+	if !ok {
+		return
+	}
+	subscriptions, err := h.core.GetUserPushSubscriptions(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": subscriptions})
 }
