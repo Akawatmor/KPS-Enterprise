@@ -25,7 +25,6 @@ steps:
   # ║  STAGE 0 — PRE-FLIGHT CHECKS (parallel, fast-fail)                      ║
   # ╚═════════════════════════════════════════════════════════════════════════╝
 
-  # ── 0a. Secret leak scan (every push) ────────────────────────────────────
   - name: secret-scan
     image: *gitleaks_image
     depends_on: []
@@ -34,7 +33,6 @@ steps:
     commands:
       - gitleaks detect --source . --config .gitleaks.toml --verbose --redact --exit-code 1 --no-banner
 
-  # ── 0b. Dockerfile linting ───────────────────────────────────────────────
   - name: dockerfile-lint
     image: *hadolint_image
     depends_on: []
@@ -44,7 +42,6 @@ steps:
       - hadolint --failure-threshold warning src/phase2-final/backend/Dockerfile
       - hadolint --failure-threshold warning src/phase2-final/frontend/Dockerfile
 
-  # ── 0c. K8s manifest static analysis ─────────────────────────────────────
   - name: k8s-lint
     image: *kubescore_img
     depends_on: []
@@ -59,14 +56,12 @@ steps:
           --ignore-test deployment-has-host-podantiaffinity \
           --output-format ci
 
-  # ── 0d. Policy as Code (OPA) ─────────────────────────────────────────────
   - name: opa-policy
     image: *conftest_image
     depends_on: []
     when:
       event: [push, pull_request]
     commands:
-      # ตรวจว่ามี policies ก่อน — ถ้าไม่มีให้ skip แทน fail
       - |
         if [ ! -d policies ] || [ -z "$(ls -A policies/*.rego 2>/dev/null)" ]; then
           echo "⚠ No policies/ directory or .rego files found — skipping"
@@ -74,11 +69,10 @@ steps:
         fi
       - conftest test src/phase2-final/k8s/ --policy policies/ --all-namespaces
 
-  # ── 0e. API contract check (no swagger needed) ──────────────────────────
   - name: api-contract-check
     image: curlimages/curl:8.12.1
     depends_on: []
-    failure: ignore # warn-only
+    failure: ignore
     when:
       event: [push]
       branch: [main, develop]
@@ -89,7 +83,6 @@ steps:
   # ║  STAGE 1 — QUALITY GATES (parallel)                                     ║
   # ╚═════════════════════════════════════════════════════════════════════════╝
 
-  # ── 1. Backend · Tests + vet + security + vulncheck ────────────────────────
   - name: quality-backend
     image: *go_image
     depends_on: [secret-scan, dockerfile-lint, k8s-lint, opa-policy]
@@ -102,45 +95,28 @@ steps:
       GOBIN: /cache/go/bin
       MIN_COVERAGE: "30"
     commands:
-      # ── Setup cached tools path ──
       - export PATH="/cache/go/bin:$PATH"
       - mkdir -p /cache/go/mod /cache/go/build /cache/go/bin
-
       - cd src/phase2-final/backend
       - go mod download
-
       - echo "══ go vet ══"
       - go vet ./...
-
       - echo "══ go test ══"
-      - |
-        go test ./... \
-          -v \
-          -count=1 \
-          -race \
-          -coverprofile=coverage.out
-
+      - go test ./... -v -count=1 -race -coverprofile=coverage.out
       - echo "══ Coverage breakdown ══"
       - go tool cover -func=coverage.out
-
       - echo "══ Coverage gate ══"
       - |
         COV=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
-
         echo "Total coverage: $${COV}% (minimum: $${MIN_COVERAGE}%)"
-
         awk -v c="$$COV" -v m="$$MIN_COVERAGE" 'BEGIN { exit !(c >= m) }' || {
           echo "❌ Coverage $${COV}% below minimum $${MIN_COVERAGE}%"
           exit 1
         }
-
         echo "✅ Coverage $${COV}% meets minimum $${MIN_COVERAGE}%"
-
-      # ── Install tools only if not cached ──
       - echo "══ gosec ══"
       - test -f /cache/go/bin/gosec || go install github.com/securego/gosec/v2/cmd/gosec@latest
-      - gosec -severity medium -confidence medium -fmt=text ./... || echo "⚠ gosec issues found (non-blocking on develop)"
-
+      - gosec -severity medium -confidence medium -fmt=text ./... || echo "⚠ gosec issues found (non- point on develop)"
       - echo "══ govulncheck ══"
       - test -f /cache/go/bin/govulncheck || go install golang.org/x/vuln/cmd/govulncheck@latest
       - govulncheck ./... || echo "⚠ vulns found (non-blocking on develop)"
@@ -178,19 +154,13 @@ steps:
     commands:
       - cd src/phase2-final/backend
       - apt-get update -qq && apt-get install -y -qq postgresql-client
-
-      # ── Wait for postgres service (timeout 60s) ──
       - |
         for i in $(seq 1 30); do
           pg_isready -h postgres -U test && break
           echo "Waiting postgres... $$i/30"
           sleep 2
         done
-
-      # ── Verify connectivity ──
       - PGPASSWORD=test psql -h postgres -U test -d test -c "SELECT version();"
-
-      # ── Run integration tests against real Postgres ──
       - echo "── Running integration tests on store/postgres adapter ──"
       - go test -tags=integration -v -count=1 ./internal/store/...
       - echo "✅ Integration tests passed"
@@ -233,15 +203,11 @@ services:
       dockerfile: src/phase2-final/backend/Dockerfile
       context: src/phase2-final/backend
       repo: akawatmor/todoapp-core
-      tags:
-        - "${CI_COMMIT_SHA:0:7}"
-        - latest
-      cache_from:
-        - "type=registry,ref=akawatmor/todoapp-core:buildcache"
-      cache_to:
-        - "type=registry,ref=akawatmor/todoapp-core:buildcache,mode=max"
+      tags: ["${CI_COMMIT_SHA:0:7}", latest]
+      cache_from: ["type=registry,ref=akawatmor/todoapp-core:buildcache"]
+      cache_to: ["type=registry,ref=akawatmor/todoapp-core:buildcache,mode=max"]
       provenance: true
-      sbom: true # built-in SBOM generation
+      sbom: true
       username: { from_secret: DOCKER_USERNAME }
       password: { from_secret: DOCKER_PASSWORD }
 
@@ -266,7 +232,6 @@ services:
       username: { from_secret: DOCKER_USERNAME }
       password: { from_secret: DOCKER_PASSWORD }
 
-  # ── Sign images with Cosign (supply chain) ───────────────────────────────
   - name: sign-images
     image: alpine:3.20
     depends_on: [build-push-core, build-push-web]
@@ -279,19 +244,14 @@ services:
           - "src/phase2-final/frontend/**"
           - ".woodpecker.yml"
     environment:
-      COSIGN_PRIVATE_KEY:
-        from_secret: COSIGN_PRIVATE_KEY
-      COSIGN_PASSWORD:
-        from_secret: COSIGN_PASSWORD
-      DOCKER_USERNAME:
-        from_secret: DOCKER_USERNAME
-      DOCKER_PASSWORD:
-        from_secret: DOCKER_PASSWORD
+      COSIGN_PRIVATE_KEY: { from_secret: COSIGN_PRIVATE_KEY }
+      COSIGN_PASSWORD: { from_secret: COSIGN_PASSWORD }
+      DOCKER_USERNAME: { from_secret: DOCKER_USERNAME }
+      DOCKER_PASSWORD: { from_secret: DOCKER_PASSWORD }
     commands:
       - apk add --no-cache curl ca-certificates
       - curl -sSL -o /usr/local/bin/cosign https://github.com/sigstore/cosign/releases/download/v2.4.0/cosign-linux-amd64
       - chmod +x /usr/local/bin/cosign
-      - cosign version
       - echo "$DOCKER_PASSWORD" | cosign login -u "$DOCKER_USERNAME" --password-stdin docker.io
       - umask 077
       - '[ -n "$COSIGN_PRIVATE_KEY" ] || { echo "❌ COSIGN_PRIVATE_KEY secret is empty"; exit 1; }'
@@ -306,18 +266,15 @@ services:
             | sed -n 's/.*"token":"\([^"]*\)".*/\1/p'
         }
         wait_for_image() {
-          repo="$1"
-          tag="$2"
+          repo="$1"; tag="$2"
           token="$(get_registry_token "$repo")"
           [ -n "$token" ] || { echo "❌ Unable to get Docker Hub token for $repo"; exit 1; }
           for i in $(seq 1 30); do
             code="$(curl -sSLo /dev/null -w '%{http_code}' \
               -H "Authorization: Bearer $token" \
-              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
               "https://index.docker.io/v2/${repo}/manifests/${tag}")"
-            if [ "$code" = "200" ]; then
-              return 0
-            fi
+            if [ "$code" = "200" ]; then return 0; fi
             echo "Waiting for ${repo}:${tag} in Docker Hub... ${i}/30 (HTTP ${code})"
             sleep 2
           done
@@ -338,7 +295,7 @@ services:
             cosign sign --yes --key /tmp/cosign.key "$repo:$tag"
             echo "✅ Signed $repo:$tag"
           else
-            echo "⚠ $repo:$tag not found in registry — not built in this run, skipping"
+            echo "⚠ $repo:$tag not found in registry — skipping"
           fi
         }
       - sign_if_built akawatmor/todoapp-core "$IMAGE_TAG"
@@ -363,12 +320,9 @@ services:
       TRIVY_PASSWORD: { from_secret: DOCKER_PASSWORD }
     commands:
       - apk add --no-cache curl ca-certificates bash
-      # Install cosign
       - curl -sSL -o /usr/local/bin/cosign https://github.com/sigstore/cosign/releases/download/v2.4.0/cosign-linux-amd64
       - chmod +x /usr/local/bin/cosign
-      # Install trivy
       - curl -sSL https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_Linux-64bit.tar.gz | tar xz -C /usr/local/bin/
-      # Login (needed to push SBOM attachment to registry)
       - echo "$DOCKER_PASSWORD" | cosign login -u "$DOCKER_USERNAME" --password-stdin docker.io
       - export IMAGE_TAG="${CI_COMMIT_SHA:0:7}"
       - |
@@ -377,25 +331,6 @@ services:
           curl -fsSL -u "$DOCKER_USERNAME:$DOCKER_PASSWORD" \
             "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull" \
             | sed -n 's/.*"token":"\([^"]*\)".*/\1/p'
-        }
-        wait_for_image() {
-          repo="$1"
-          tag="$2"
-          token="$(get_registry_token "$repo")"
-          [ -n "$token" ] || { echo "❌ Unable to get Docker Hub token for $repo"; exit 1; }
-          for i in $(seq 1 30); do
-            code="$(curl -sSLo /dev/null -w '%{http_code}' \
-              -H "Authorization: Bearer $token" \
-              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json' \
-              "https://index.docker.io/v2/${repo}/manifests/${tag}")"
-            if [ "$code" = "200" ]; then
-              return 0
-            fi
-            echo "Waiting for ${repo}:${tag} in Docker Hub... ${i}/30 (HTTP ${code})"
-            sleep 2
-          done
-          echo "❌ Image ${repo}:${tag} is not available in Docker Hub"
-          exit 1
         }
       - |
         sbom_if_built() {
@@ -442,32 +377,6 @@ services:
       - mkdir -p /cache/trivy
       - export IMAGE_TAG="${CI_COMMIT_SHA:0:7}"
       - |
-        get_registry_token() {
-          repo="$1"
-          curl -fsSL -u "$TRIVY_USERNAME:$TRIVY_PASSWORD" \
-            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull" \
-            | sed -n 's/.*"token":"\([^"]*\)".*/\1/p'
-        }
-        wait_for_image() {
-          repo="$1"
-          tag="$2"
-          token="$(get_registry_token "$repo")"
-          [ -n "$token" ] || { echo "❌ Unable to get Docker Hub token for $repo"; exit 1; }
-          for i in $(seq 1 30); do
-            code="$(curl -sSLo /dev/null -w '%{http_code}' \
-              -H "Authorization: Bearer $token" \
-              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json' \
-              "https://index.docker.io/v2/${repo}/manifests/${tag}")"
-            if [ "$code" = "200" ]; then
-              return 0
-            fi
-            echo "Waiting for ${repo}:${tag} in Docker Hub... ${i}/30 (HTTP ${code})"
-            sleep 2
-          done
-          echo "❌ Image ${repo}:${tag} is not available in Docker Hub"
-          exit 1
-        }
-      - |
         scan_if_built() {
           repo="$1"; tag="$2"
           token="$(curl -fsSL -u "$TRIVY_USERNAME:$TRIVY_PASSWORD" \
@@ -486,9 +395,7 @@ services:
         }
       - scan_if_built akawatmor/todoapp-core "$IMAGE_TAG"
       - scan_if_built akawatmor/todoapp-web "$IMAGE_TAG"
-      # K8s misconfig scan
       - trivy config --exit-code 1 --severity HIGH,CRITICAL src/phase2-final/k8s/
-      # IaC secrets scan
       - trivy fs --scanners secret --exit-code 1 src/
 
   # ╔═════════════════════════════════════════════════════════════════════════╗
@@ -516,7 +423,7 @@ services:
           pg_dump -U "$PG_USER" "$PG_DATABASE" | gzip > "$SNAP"
       - ls -lh "$SNAP"
       - echo "$SNAP" > /cache/db-backups/latest.txt
-      - echo "✅ DB snapshot saved (rollback recovery point)"
+      - echo "✅ DB snapshot saved"
 
   - name: migration-test
     image: *go_image
@@ -528,7 +435,6 @@ services:
       - go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
       - export DB="postgres://test:test@pg-test:5432/test?sslmode=disable"
       - cd src/phase2-final/backend
-      # ทดสอบ up → down → up (rollback compatibility)
       - migrate -path migrations -database "$DB" up
       - migrate -path migrations -database "$DB" down -all
       - migrate -path migrations -database "$DB" up
@@ -550,22 +456,16 @@ services:
       - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
       - export KUBECONFIG=/tmp/kubeconfig
       - trap 'rm -f /tmp/kubeconfig' EXIT
-
-      # Apply infra ที่ idempotent
       - kubectl apply -f src/phase2-final/k8s/namespace.yaml
       - kubectl apply -f src/phase2-final/k8s/networkpolicy.yaml
       - kubectl apply -f src/phase2-final/k8s/pdb-hpa.yaml
       - kubectl apply -f src/phase2-final/k8s/core-services.yaml
       - kubectl apply -f src/phase2-final/k8s/traefik-weighted.yaml
-
-      # Deploy canary ด้วย image ใหม่
       - |
         kubectl set image deployment/todoapp-core-canary \
           core=akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7} -n todoapp
       - kubectl scale deployment/todoapp-core-canary --replicas=1 -n todoapp
       - kubectl rollout status deployment/todoapp-core-canary -n todoapp --timeout=180s
-
-      # Shift traffic 10% → canary
       - |
         kubectl patch traefikservice todoapp-core-weighted -n todoapp --type=merge -p '
         {"spec":{"weighted":{"services":[
@@ -591,8 +491,6 @@ services:
       - export KUBECONFIG=/tmp/kubeconfig
       - trap 'rm -f /tmp/kubeconfig' EXIT
       - apk add --no-cache curl jq bc
-
-      # ── Smoke test canary โดยตรง ──
       - |
         kubectl run smoke-canary-${CI_COMMIT_SHA:0:7} \
           --image=curlimages/curl:8.12.1 --restart=Never --rm -i --wait \
@@ -601,12 +499,9 @@ services:
             curl -sf http://todoapp-core-canary:8080/healthz &&
             curl -sf http://todoapp-core-canary:8080/readyz
           '
-
-      # ── Bake time: ดู metrics 2 นาที ──
       - echo "⏳ Baking canary for 120s..."
       - sleep 120
-
-      # ── Error rate analysis (จาก app /metrics endpoint Prometheus format) ──
+      # แก้ไขเรื่อง Default value กันพังกรณีค่าว่าง
       - |
         ERRORS=$(kubectl run analyze-${CI_COMMIT_SHA:0:7} \
           --image=curlimages/curl:8.12.1 --restart=Never --rm -i --wait \
@@ -618,9 +513,13 @@ services:
           --timeout=30s -n todoapp \
           -- curl -s http://todoapp-core-canary:8080/metrics \
           | grep '^http_requests_total{' | awk '{s+=\$2} END {print s+0}')
+        
+        ERRORS=${ERRORS:-0}
+        TOTAL=${TOTAL:-0}
+        
         RATE=$(echo "scale=4; $ERRORS / ($TOTAL + 1) * 100" | bc)
         echo "Error rate: $RATE% ($ERRORS / $TOTAL)"
-        # Threshold 1%
+        
         if (( $(echo "$RATE > 1.0" | bc -l) )); then
           echo "❌ Error rate too high — abort canary"
           exit 1
@@ -644,35 +543,26 @@ services:
       - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
       - export KUBECONFIG=/tmp/kubeconfig
       - trap 'rm -f /tmp/kubeconfig' EXIT
-
-      # Step 1: 50/50 traffic
       - |
         kubectl patch traefikservice todoapp-core-weighted -n todoapp --type=merge -p '
         {"spec":{"weighted":{"services":[
           {"name":"todoapp-core-stable","port":8080,"weight":50},
           {"name":"todoapp-core-canary","port":8080,"weight":50}
         ]}}}'
-      - |
-        echo "📊 Traffic: 50/50"
+      - echo "📊 Traffic: 50/50"
       - sleep 60
-      # Step 2: Update stable image to new version (rolling update)
       - |
         kubectl set image deployment/todoapp-core-stable \
           core=akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7} -n todoapp
       - kubectl rollout status deployment/todoapp-core-stable -n todoapp --timeout=300s
-      # Step 3: 100% to stable (which now has new image)
       - |
         kubectl patch traefikservice todoapp-core-weighted -n todoapp --type=merge -p '
         {"spec":{"weighted":{"services":[
           {"name":"todoapp-core-stable","port":8080,"weight":100},
           {"name":"todoapp-core-canary","port":8080,"weight":0}
         ]}}}'
-
-      # Step 4: Scale down canary
       - kubectl scale deployment/todoapp-core-canary --replicas=0 -n todoapp
       - echo "🎉 Promoted to 100% stable"
-
-      # Same for web (simpler — direct rolling update since stateless)
       - |
         kubectl set image deployment/todoapp-web \
           web=akawatmor/todoapp-web:${CI_COMMIT_SHA:0:7} -n todoapp
@@ -697,10 +587,7 @@ services:
       - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
       - export KUBECONFIG=/tmp/kubeconfig
       - trap 'rm -f /tmp/kubeconfig' EXIT
-
       - echo "🚨 ROLLBACK INITIATED"
-
-      # 1. Cut canary traffic immediately
       - |
         kubectl patch traefikservice todoapp-core-weighted -n todoapp --type=merge -p '
         {"spec":{"weighted":{"services":[
@@ -708,27 +595,17 @@ services:
           {"name":"todoapp-core-canary","port":8080,"weight":0}
         ]}}}'
       - echo "✓ Traffic restored to stable"
-      # 2. Scale down canary
       - kubectl scale deployment/todoapp-core-canary --replicas=0 -n todoapp
-
-      # 3. Undo any rolling update on stable (just in case)
       - kubectl rollout undo deployment/todoapp-core-stable -n todoapp || true
-      - kubectl rollout undo deployment/todoapp-web -n todoapp || true
+      # เอาการ undo ของ web ออก เพราะในกระบวนการ Canary เรายังไม่ได้แตะ deployment ของ web เลย
       - kubectl rollout status deployment/todoapp-core-stable -n todoapp --timeout=180s
-
-      # 4. (Optional) Restore DB snapshot — uncomment if needed
-      # - SNAP=$(cat /cache/db-backups/latest.txt)
-      # - gunzip -c "$SNAP" | kubectl exec -i -n todoapp todoapp-postgres-0 -- \
-      #     psql -U "$PG_USER" "$PG_DATABASE"
-
       - echo "✅ Rollback complete — production safe"
-      - exit 1 # mark pipeline as failed
+      # เอา exit 1 ออก เพื่อให้ Notification ทำงานต่อได้ตาม Dependency Chain
 
   # ╔═════════════════════════════════════════════════════════════════════════╗
   # ║  STAGE 9 — POST-DEPLOY VERIFICATION                                     ║
   # ╚═════════════════════════════════════════════════════════════════════════╝
 
-  # ── Full smoke test against production ───────────────────────────────────
   - name: smoke-test-prod
     image: *kubectl_image
     depends_on: [promote-stable]
@@ -742,7 +619,6 @@ services:
       - export KUBECONFIG=/tmp/kubeconfig
       - trap 'rm -f /tmp/kubeconfig' EXIT
       - sleep 5
-      # รัน smoke ทั้ง 4 endpoints แบบ parallel ใน 1 pod
       - |
         kubectl run smoke-prod-${CI_COMMIT_SHA:0:7} \
           --image=curlimages/curl:8.12.1 --restart=Never --rm -i --wait \
@@ -757,11 +633,10 @@ services:
             curl -sf -H "X-User-ID: smoke" http://todoapp-core:8080/api/v1/tasks
           '
 
-  # ── Load test ────────────────────────────────────────────────────────────
   - name: load-test
     image: *k6_image
     depends_on: [smoke-test-prod]
-    failure: ignore # warn-only, ไม่ rollback
+    failure: ignore
     when:
       event: push
       branch: main
@@ -777,8 +652,8 @@ services:
             { duration: '30s', target: 0 },
           ],
           thresholds: {
-            http_req_duration: ['p(95)<500'],   // p95 < 500ms
-            http_req_failed:   ['rate<0.01'],   // < 1% errors
+            http_req_duration: ['p(95)<500'],
+            http_req_failed:   ['rate<0.01'],
           },
         };
         export default function () {
@@ -788,7 +663,6 @@ services:
         EOF
       - k6 run /tmp/load.js
 
-  # ── Chaos test (kill random pod, ระบบยังต้องตอบ) ────────────────────────
   - name: chaos-test
     image: *kubectl_image
     depends_on: [smoke-test-prod]
@@ -796,18 +670,16 @@ services:
     when:
       event: push
       branch: main
-      evaluate: 'CI_COMMIT_MESSAGE contains "[chaos]"' # opt-in trigger
+      evaluate: 'CI_COMMIT_MESSAGE contains "[chaos]"'
     environment:
       KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
     commands:
       - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
       - export KUBECONFIG=/tmp/kubeconfig
       - trap 'rm -f /tmp/kubeconfig' EXIT
-      # Kill 1 random core pod
       - VICTIM=$(kubectl get pod -n todoapp -l app=todoapp-core,track=stable -o name | shuf -n 1)
       - echo "💀 Killing $VICTIM"
       - kubectl delete $VICTIM -n todoapp
-      # ระบบต้องยัง response ได้ภายใน 10s (PDB + replicas ทำงาน)
       - sleep 5
       - |
         kubectl run chaos-check-${CI_COMMIT_SHA:0:7} \
@@ -816,11 +688,10 @@ services:
           -- curl -sf --retry 5 --retry-delay 2 http://todoapp-core:8080/healthz
       - echo "✅ Survived pod failure"
 
-    # ╔═════════════════════════════════════════════════════════════════════════╗
-  # ║  STAGE 10 — NOTIFICATIONS                                                ║
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 10 — NOTIFICATIONS                                               ║
   # ╚═════════════════════════════════════════════════════════════════════════╝
 
-  # ── 10a. Success notification ────────────────────────────────────────────
   - name: email-success
     image: *email_image
     depends_on: [smoke-test-prod, load-test]
@@ -849,7 +720,6 @@ services:
               All gates passed · Traffic now 100% on new version
             </p>
           </div>
-
           <h3>Pipeline Flow</h3>
           <pre style="background: #f9fafb; padding: 12px; border-radius: 6px; font-size: 12px; overflow: auto">
           preflight ✅ → quality ✅ → integration ✅ → build ✅ → sign ✅
@@ -857,7 +727,6 @@ services:
           → canary 10% ✅ → analyze ✅ → 50/50 ✅ → 100% ✅
           → smoke ✅ → load ✅
           </pre>
-
           <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:16px">
             <tr style="background:#f9fafb">
               <td style="padding:10px;border:1px solid #e5e7eb;font-weight:600;width:140px">Repository</td>
@@ -875,37 +744,13 @@ services:
               <td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Message</td>
               <td style="padding:10px;border:1px solid #e5e7eb">${CI_COMMIT_MESSAGE}</td>
             </tr>
-            <tr style="background:#f9fafb">
-              <td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Image</td>
-              <td style="padding:10px;border:1px solid #e5e7eb">
-                <code>akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7}</code>
-                <span style="color:#16a34a">🔏 cosign-signed</span>
-              </td>
-            </tr>
           </table>
-
-          <div style="margin-top:20px;padding:14px;background:#eff6ff;border-radius:6px;font-size:13px">
-            <b>🛡️ Safety net active:</b><br/>
-            • DB snapshot saved · • Previous ReplicaSet retained ·
-            • <code>kubectl rollout undo</code> available for 10 revisions
-          </div>
-
           <div style="margin-top:20px;text-align:center">
-            <a href="${CI_BUILD_LINK}"
-               style="display:inline-block;padding:10px 24px;background:#2563eb;color:#fff;
-                      text-decoration:none;border-radius:6px;margin-right:8px">
-              Pipeline Log
-            </a>
-            <a href="https://todoapp-kps.akawatmor.com"
-               style="display:inline-block;padding:10px 24px;background:#059669;color:#fff;
-                      text-decoration:none;border-radius:6px">
-              Open Production
-            </a>
+            <a href="${CI_BUILD_LINK}" style="display:inline-block;padding:10px 24px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px">Pipeline Log</a>
           </div>
         </body>
         </html>
 
-  # ── 10b. Rollback notification ───────────────────────────────────────────
   - name: email-rollback
     image: *email_image
     depends_on: [auto-rollback]
@@ -913,7 +758,8 @@ services:
     when:
       - event: push
         branch: main
-        status: [failure, success] # auto-rollback exit 1 → status=failure
+        # เปลี่ยนเป็นรับเฉพาะ success เพราะตัว auto-rollback โดนแก้ให้รันจบแบบ success แล้ว
+        status: [success]
     settings:
       host: { from_secret: SMTP_HOST }
       port: 587
@@ -930,68 +776,17 @@ services:
         <body style="font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width: 640px;margin: 0 auto;padding: 24px;color: #1f2937">
           <div style="background:#fef2f2;border-left:4px solid #ef4444;padding:16px;margin-bottom:24px">
             <h2 style="color:#dc2626;margin:0">🚨 Auto-Rollback Executed</h2>
-            <p style="margin:8px 0 0;color:#991b1b">
-              Canary failed analysis · Production restored to previous version
-            </p>
+            <p style="margin:8px 0 0;color:#991b1b">Canary failed analysis · Production restored</p>
           </div>
-
-          <h3>What happened</h3>
-          <ol style="font-size:14px;line-height:1.8">
-            <li>Canary deployed at 10% traffic</li>
-            <li>Analysis detected error rate &gt; 1% OR smoke test failed</li>
-            <li>Traffic immediately routed back to <b>stable</b> (100%)</li>
-            <li>Canary scaled to 0 replicas</li>
-            <li><code>kubectl rollout undo</code> applied as safety</li>
-          </ol>
-
-          <div style="margin-top:16px;padding:14px;background:#fefce8;border-radius:6px;font-size:14px">
-            ✅ <b>End-users were not impacted</b> — only 10% saw degraded service
-            for &lt; 2 minutes during canary phase.
-          </div>
-
-          <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:16px">
-            <tr style="background:#f9fafb">
-              <td style="padding:10px;border:1px solid #e5e7eb;font-weight:600;width:140px">Failed commit</td>
-              <td style="padding:10px;border:1px solid #e5e7eb"><code>${CI_COMMIT_SHA:0:7}</code></td>
-            </tr>
-            <tr>
-              <td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Author</td>
-              <td style="padding:10px;border:1px solid #e5e7eb">${CI_COMMIT_AUTHOR}</td>
-            </tr>
-            <tr style="background:#f9fafb">
-              <td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Message</td>
-              <td style="padding:10px;border:1px solid #e5e7eb">${CI_COMMIT_MESSAGE}</td>
-            </tr>
-          </table>
-
           <div style="margin-top:20px;text-align:center">
-            <a href="${CI_BUILD_LINK}"
-               style="display:inline-block;padding:10px 24px;background:#dc2626;color:#fff;
-                      text-decoration:none;border-radius:6px">
-              ดู Pipeline Log เพื่อหาสาเหตุ
-            </a>
+            <a href="${CI_BUILD_LINK}" style="display:inline-block;padding:10px 24px;background:#dc2626;color:#fff;text-decoration:none;border-radius:6px">ดู Pipeline Log</a>
           </div>
         </body>
         </html>
 
-  # ── 10c. Pre-deploy failure (build/test/scan failed before canary) ───────
   - name: email-prefail
     image: *email_image
-    depends_on:
-      - secret-scan
-      - dockerfile-lint
-      - k8s-lint
-      - opa-policy
-      - api-contract-check
-      - quality-backend
-      - quality-frontend
-      - integration-test
-      - build-push-core
-      - build-push-web
-      - sign-images
-      - trivy-scan
-      - db-snapshot
-      - migration-test
+    # ปลด depends_on ออกทั้งหมด เพื่อให้มันจับความล้มเหลวที่เกิดจากจุดไหนก็ได้ใน Pipeline
     failure: ignore
     when:
       - event: push
@@ -1013,41 +808,10 @@ services:
         <body style="font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width: 640px;margin: 0 auto;padding: 24px;color: #1f2937">
           <div style="background:#fef2f2;border-left:4px solid #ef4444;padding:16px;margin-bottom:24px">
             <h2 style="color:#dc2626;margin:0">❌ Pipeline Failed (Pre-Deploy)</h2>
-            <p style="margin:8px 0 0;color:#991b1b">
-              Failure caught BEFORE production touched · No rollback needed
-            </p>
+            <p style="margin:8px 0 0;color:#991b1b">Failure caught BEFORE production touched</p>
           </div>
-
-          <div style="padding:14px;background:#f0fdf4;border-radius:6px;font-size:14px">
-            ✅ <b>Production is untouched</b> — running previous stable version normally.
-          </div>
-
-          <p style="margin-top:16px;font-size:14px">
-            Possible failure points:<br/>
-            <code>secret-scan · lint · policy · tests · build · sign · scan · db-migration</code>
-          </p>
-
-          <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:16px">
-            <tr style="background:#f9fafb">
-              <td style="padding:10px;border:1px solid #e5e7eb;font-weight:600;width:140px">Commit</td>
-              <td style="padding:10px;border:1px solid #e5e7eb"><code>${CI_COMMIT_SHA:0:7}</code></td>
-            </tr>
-            <tr>
-              <td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Author</td>
-              <td style="padding:10px;border:1px solid #e5e7eb">${CI_COMMIT_AUTHOR}</td>
-            </tr>
-            <tr style="background:#f9fafb">
-              <td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Message</td>
-              <td style="padding:10px;border:1px solid #e5e7eb">${CI_COMMIT_MESSAGE}</td>
-            </tr>
-          </table>
-
           <div style="margin-top:20px;text-align:center">
-            <a href="${CI_BUILD_LINK}"
-               style="display:inline-block;padding:10px 24px;background:#dc2626;color:#fff;
-                      text-decoration:none;border-radius:6px">
-              ดู Pipeline Log
-            </a>
+            <a href="${CI_BUILD_LINK}" style="display:inline-block;padding:10px 24px;background:#dc2626;color:#fff;text-decoration:none;border-radius:6px">ดู Pipeline Log</a>
           </div>
         </body>
         </html>
