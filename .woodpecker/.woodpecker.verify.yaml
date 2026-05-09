@@ -10,7 +10,7 @@ variables:
   - &cosign_image "ghcr.io/sigstore/cosign/cosign:v2.4.0"
   - &gitleaks_image "zricethezav/gitleaks:latest"
   - &hadolint_image "hadolint/hadolint:latest-debian"
-  - &kubescore_img "zegl/kube-score:latest"
+  - &kubescore_image "zegl/kube-score:latest"
   - &conftest_image "openpolicyagent/conftest:latest"
   - &k6_image "grafana/k6:latest"
   - &oasdiff_image "tufin/oasdiff:latest"
