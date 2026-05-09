@@ -1,0 +1,68 @@
+when:
+  - branch: [main]
+    event: [push]
+
+variables:
+  - &buildx_image "woodpeckerci/plugin-docker-buildx:4"
+
+steps:
+
+  - name: build-core
+    image: *buildx_image
+    privileged: true
+
+    settings:
+      repo: akawatmor/todoapp-core
+      dockerfile: src/phase2-final/backend/Dockerfile
+      context: src/phase2-final/backend
+
+      tags:
+        - "${CI_COMMIT_SHA:0:7}"
+        - latest
+
+      cache_from:
+        - type=registry,ref=akawatmor/todoapp-core:buildcache
+
+      cache_to:
+        - type=registry,ref=akawatmor/todoapp-core:buildcache,mode=max
+
+      username:
+        from_secret: DOCKER_USERNAME
+
+      password:
+        from_secret: DOCKER_PASSWORD
+
+  - name: build-web
+    image: *buildx_image
+    privileged: true
+
+    settings:
+      repo: akawatmor/todoapp-web
+      dockerfile: src/phase2-final/frontend/Dockerfile
+      context: src/phase2-final/frontend
+
+      tags:
+        - "${CI_COMMIT_SHA:0:7}"
+        - latest
+
+      cache_from:
+        - type=registry,ref=akawatmor/todoapp-web:buildcache
+
+      cache_to:
+        - type=registry,ref=akawatmor/todoapp-web:buildcache,mode=max
+
+      username:
+        from_secret: DOCKER_USERNAME
+
+      password:
+        from_secret: DOCKER_PASSWORD
+
+  - name: build-gate
+    image: alpine:3.20
+
+    depends_on:
+      - build-core
+      - build-web
+
+    commands:
+      - echo "Build completed"

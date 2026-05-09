@@ -1,0 +1,35 @@
+when:
+  - branch: [main]
+    event: [push]
+
+variables:
+  - &trivy_image "aquasec/trivy:0.69.3"
+
+steps:
+
+  - name: trivy-scan
+    image: *trivy_image
+
+    environment:
+      TRIVY_USERNAME:
+        from_secret: DOCKER_USERNAME
+
+      TRIVY_PASSWORD:
+        from_secret: DOCKER_PASSWORD
+
+    commands:
+      - export TAG="${CI_COMMIT_SHA:0:7}"
+
+      - |
+        trivy image \
+          --severity HIGH,CRITICAL \
+          --ignore-unfixed \
+          --exit-code 1 \
+          akawatmor/todoapp-core:$TAG
+
+      - |
+        trivy image \
+          --severity HIGH,CRITICAL \
+          --ignore-unfixed \
+          --exit-code 1 \
+          akawatmor/todoapp-web:$TAG

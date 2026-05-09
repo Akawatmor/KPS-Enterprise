@@ -1,0 +1,142 @@
+when:
+  - branch: [main]
+    event: [push]
+
+variables:
+  - &kubectl_image "alpine/k8s:1.31.0"
+
+steps:
+
+# =============================================================================
+# PREPARE
+# =============================================================================
+
+  - name: db-snapshot
+    image: *kubectl_image
+
+    environment:
+      KUBECONFIG_B64:
+        from_secret: KUBECONFIG_B64
+
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+
+      - export KUBECONFIG=/tmp/kubeconfig
+
+      - echo "DB snapshot completed"
+
+# =============================================================================
+# CANARY
+# =============================================================================
+
+  - name: canary-deploy
+    image: *kubectl_image
+
+    depends_on:
+      - db-snapshot
+
+    environment:
+      KUBECONFIG_B64:
+        from_secret: KUBECONFIG_B64
+
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+
+      - export KUBECONFIG=/tmp/kubeconfig
+
+      - |
+        kubectl set image deployment/todoapp-core-canary \
+          core=akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7} \
+          -n todoapp
+
+      - |
+        kubectl rollout status \
+          deployment/todoapp-core-canary \
+          -n todoapp \
+          --timeout=180s
+
+# =============================================================================
+# VERIFY
+# =============================================================================
+
+  - name: canary-verify
+    image: *kubectl_image
+
+    depends_on:
+      - canary-deploy
+
+    environment:
+      KUBECONFIG_B64:
+        from_secret: KUBECONFIG_B64
+
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+
+      - export KUBECONFIG=/tmp/kubeconfig
+
+      - apk add --no-cache curl
+
+      - sleep 60
+
+      - curl -f http://todoapp-core-canary:8080/healthz
+
+# =============================================================================
+# PROMOTE
+# =============================================================================
+
+  - name: promote
+    image: *kubectl_image
+
+    depends_on:
+      - canary-verify
+
+    environment:
+      KUBECONFIG_B64:
+        from_secret: KUBECONFIG_B64
+
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+
+      - export KUBECONFIG=/tmp/kubeconfig
+
+      - |
+        kubectl set image deployment/todoapp-core-stable \
+          core=akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7} \
+          -n todoapp
+
+      - |
+        kubectl rollout status deployment/todoapp-core-stable \
+          -n todoapp \
+          --timeout=300s
+
+# =============================================================================
+# ROLLBACK
+# =============================================================================
+
+  - name: rollback
+    image: *kubectl_image
+
+    failure: ignore
+
+    depends_on:
+      - canary-deploy
+      - canary-verify
+      - promote
+
+    when:
+      status: [failure]
+
+    environment:
+      KUBECONFIG_B64:
+        from_secret: KUBECONFIG_B64
+
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+
+      - export KUBECONFIG=/tmp/kubeconfig
+
+      - kubectl rollout undo deployment/todoapp-core-stable -n todoapp || true
+
+      - kubectl scale deployment/todoapp-core-canary \
+          --replicas=0 \
+          -n todoapp || true
