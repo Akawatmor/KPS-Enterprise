@@ -328,8 +328,8 @@ services:
       - cosign public-key --key /tmp/cosign.key >/dev/null || { echo "❌ COSIGN_PASSWORD cannot decrypt COSIGN_PRIVATE_KEY"; exit 1; }
       - wait_for_image akawatmor/todoapp-core "$IMAGE_TAG"
       - wait_for_image akawatmor/todoapp-web "$IMAGE_TAG"
-      - cosign sign --yes --key /tmp/cosign.key akawatmor/todoapp-core:${IMAGE_TAG}
-      - cosign sign --yes --key /tmp/cosign.key akawatmor/todoapp-web:${IMAGE_TAG}
+      - 'cosign sign --yes --key /tmp/cosign.key akawatmor/todoapp-core:${IMAGE_TAG}'
+      - 'cosign sign --yes --key /tmp/cosign.key akawatmor/todoapp-web:${IMAGE_TAG}'
       - echo "✅ Images signed"
 
   - name: sbom-attest
@@ -387,10 +387,10 @@ services:
       - wait_for_image akawatmor/todoapp-core "$IMAGE_TAG"
       - wait_for_image akawatmor/todoapp-web "$IMAGE_TAG"
       # Generate + attach SBOM — attach sbom needs no private key
-      - trivy image --skip-version-check --format cyclonedx --output /tmp/sbom-core.json akawatmor/todoapp-core:${IMAGE_TAG}
-      - cosign attach sbom --sbom /tmp/sbom-core.json akawatmor/todoapp-core:${IMAGE_TAG}
-      - trivy image --skip-version-check --format cyclonedx --output /tmp/sbom-web.json akawatmor/todoapp-web:${IMAGE_TAG}
-      - cosign attach sbom --sbom /tmp/sbom-web.json akawatmor/todoapp-web:${IMAGE_TAG}
+      - 'trivy image --skip-version-check --format cyclonedx --output /tmp/sbom-core.json akawatmor/todoapp-core:${IMAGE_TAG}'
+      - 'cosign attach sbom --sbom /tmp/sbom-core.json akawatmor/todoapp-core:${IMAGE_TAG}'
+      - 'trivy image --skip-version-check --format cyclonedx --output /tmp/sbom-web.json akawatmor/todoapp-web:${IMAGE_TAG}'
+      - 'cosign attach sbom --sbom /tmp/sbom-web.json akawatmor/todoapp-web:${IMAGE_TAG}'
       - rm -f /tmp/sbom-*.json
       - echo "✅ SBOM attached to both images"
 
@@ -446,8 +446,8 @@ services:
       - wait_for_image akawatmor/todoapp-core "$IMAGE_TAG"
       - wait_for_image akawatmor/todoapp-web "$IMAGE_TAG"
       # Image vulns
-      - trivy image --skip-version-check --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --format table akawatmor/todoapp-core:${IMAGE_TAG}
-      - trivy image --skip-version-check --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --format table akawatmor/todoapp-web:${IMAGE_TAG}
+      - 'trivy image --skip-version-check --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --format table akawatmor/todoapp-core:${IMAGE_TAG}'
+      - 'trivy image --skip-version-check --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --format table akawatmor/todoapp-web:${IMAGE_TAG}'
       # K8s misconfig scan
       - trivy config --exit-code 1 --severity HIGH,CRITICAL src/phase2-final/k8s/
       # IaC secrets scan
