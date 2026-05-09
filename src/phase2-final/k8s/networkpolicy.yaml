@@ -1,0 +1,46 @@
+# NetworkPolicy — default-deny + controlled allow for todoapp namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: todoapp-default-deny-ingress
+  namespace: todoapp
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Allow traffic from Traefik ingress controller (runs in kube-system)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: todoapp-allow-from-ingress
+  namespace: todoapp
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: todoapp
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+---
+# Allow intra-namespace communication (frontend → core → postgres)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: todoapp-allow-intra-namespace
+  namespace: todoapp
+spec:
+  podSelector: {}
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
