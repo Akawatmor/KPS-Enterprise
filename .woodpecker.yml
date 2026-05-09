@@ -446,10 +446,8 @@ services:
       - wait_for_image akawatmor/todoapp-core "$IMAGE_TAG"
       - wait_for_image akawatmor/todoapp-web "$IMAGE_TAG"
       # Image vulns
-      - trivy image --skip-version-check --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed
-        --format table akawatmor/todoapp-core:${IMAGE_TAG}
-      - trivy image --skip-version-check --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed
-        --format table akawatmor/todoapp-web:${IMAGE_TAG}
+      - trivy image --skip-version-check --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --format table akawatmor/todoapp-core:${IMAGE_TAG}
+      - trivy image --skip-version-check --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --format table akawatmor/todoapp-web:${IMAGE_TAG}
       # K8s misconfig scan
       - trivy config --exit-code 1 --severity HIGH,CRITICAL src/phase2-final/k8s/
       # IaC secrets scan
