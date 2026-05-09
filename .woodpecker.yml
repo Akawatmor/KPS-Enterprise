@@ -400,7 +400,7 @@ services:
 
   - name: trivy-scan
     image: *trivy_image
-    depends_on: [build-push-core, build-push-web]
+    depends_on: [sbom-attest]
     when:
       event: push
       branch: main
