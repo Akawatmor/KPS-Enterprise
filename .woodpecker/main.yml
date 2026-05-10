@@ -204,7 +204,7 @@ services:
       event: push
       branch: main
       path:
-        include: ["src/phase2-final/backend/**", ".woodpecker.yml"]
+        include: ["src/phase2-final/backend/**", ".woodpecker/**"]
     settings:
       dockerfile: src/phase2-final/backend/Dockerfile
       context: src/phase2-final/backend
@@ -225,7 +225,7 @@ services:
       event: push
       branch: main
       path:
-        include: ["src/phase2-final/frontend/**", ".woodpecker.yml"]
+        include: ["src/phase2-final/frontend/**", ".woodpecker/**"]
     settings:
       dockerfile: src/phase2-final/frontend/Dockerfile
       context: src/phase2-final/frontend
@@ -250,7 +250,7 @@ services:
         include:
           - "src/phase2-final/backend/**"
           - "src/phase2-final/frontend/**"
-          - ".woodpecker.yml"
+          - ".woodpecker/**"
     environment:
       COSIGN_PRIVATE_KEY: { from_secret: COSIGN_PRIVATE_KEY }
       COSIGN_PASSWORD: { from_secret: COSIGN_PASSWORD }
@@ -320,7 +320,7 @@ services:
         include:
           - "src/phase2-final/backend/**"
           - "src/phase2-final/frontend/**"
-          - ".woodpecker.yml"
+          - ".woodpecker/**"
     environment:
       DOCKER_USERNAME: { from_secret: DOCKER_USERNAME }
       DOCKER_PASSWORD: { from_secret: DOCKER_PASSWORD }
@@ -375,7 +375,7 @@ services:
         include:
           - "src/phase2-final/backend/**"
           - "src/phase2-final/frontend/**"
-          - ".woodpecker.yml"
+          - ".woodpecker/**"
     environment:
       TRIVY_USERNAME: { from_secret: DOCKER_USERNAME }
       TRIVY_PASSWORD: { from_secret: DOCKER_PASSWORD }
@@ -464,14 +464,35 @@ services:
       - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
       - export KUBECONFIG=/tmp/kubeconfig
       - trap 'rm -f /tmp/kubeconfig' EXIT
+
+      # 1. Apply Namespace and Base Configs
       - kubectl apply -f src/phase2-final/k8s/namespace.yaml
+      - kubectl apply -f src/phase2-final/k8s/configmap.yaml
+
+      # 2. Apply Database Infrastructure
+      - kubectl apply -f src/phase2-final/k8s/core-pvc.yaml
+      - kubectl apply -f src/phase2-final/k8s/postgres-service.yaml
+      - kubectl apply -f src/phase2-final/k8s/postgres-statefulset.yaml
+
+      # 3. Apply Core and Web Services & Ingress
+      - kubectl apply -f src/phase2-final/k8s/core-service.yaml || true
+      - kubectl apply -f src/phase2-final/k8s/web-service.yaml
+      - kubectl apply -f src/phase2-final/k8s/ingress.yaml
+
+      # 4. Apply Network Policies, PDB, HPA
       - kubectl apply -f src/phase2-final/k8s/networkpolicy.yaml
       - kubectl apply -f src/phase2-final/k8s/pdb-hpa.yaml
+
+      # 5. Apply Canary Services and Traefik Weights
       - kubectl apply -f src/phase2-final/k8s/core-services.yaml
       - kubectl apply -f src/phase2-final/k8s/traefik-weighted.yaml
+
+      # 6. Apply Stable Deployments (Initial state if not exist)
+      - kubectl apply -f src/phase2-final/k8s/core-deployment.yaml
+      - kubectl apply -f src/phase2-final/k8s/web-deployment.yaml
+
       - |
-        kubectl set image deployment/todoapp-core-canary \
-          core=akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7} -n todoapp
+        kubectl set image deployment/todoapp-core-canary \          core=akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7} -n todoapp
       - kubectl scale deployment/todoapp-core-canary --replicas=1 -n todoapp
       - kubectl rollout status deployment/todoapp-core-canary -n todoapp --timeout=180s
       - |
@@ -708,17 +729,13 @@ services:
         branch: main
         status: [success]
     settings:
-      host: { from_secret: SMTP_HOST }
-      port: 587
-      username: { from_secret: SMTP_USERNAME }
-      password: { from_secret: SMTP_PASSWORD }
-      from: { from_secret: SMTP_USERNAME }
+      dsn: { from_secret: SMTP_DSN }
+      from.address: { from_secret: SMTP_USERNAME }
       recipients: { from_secret: NOTIFY_EMAIL }
       recipients_only: true
-      subject: >-
+      content.subject: >-
         ✅ [KPS] Canary→Stable promoted — ${CI_REPO_NAME}@${CI_COMMIT_SHA:0:7}
-      content_type: text/html
-      body: |
+      content.body: |
         <html>
         <body style="font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width: 640px;margin: 0 auto;padding: 24px;color: #1f2937">
           <div style="background:#f0fdf4;border-left:4px solid #22c55e;padding:16px;margin-bottom:24px">
@@ -766,17 +783,13 @@ services:
         branch: main
         status: [failure]
     settings:
-      host: { from_secret: SMTP_HOST }
-      port: 587
-      username: { from_secret: SMTP_USERNAME }
-      password: { from_secret: SMTP_PASSWORD }
-      from: { from_secret: SMTP_USERNAME }
+      dsn: { from_secret: SMTP_DSN }
+      from.address: { from_secret: SMTP_USERNAME }
       recipients: { from_secret: NOTIFY_EMAIL }
       recipients_only: true
-      subject: >-
+      content.subject: >-
         🚨 [KPS] AUTO-ROLLBACK executed — ${CI_COMMIT_SHA:0:7}
-      content_type: text/html
-      body: |
+      content.body: |
         <html>
         <body style="font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width: 640px;margin: 0 auto;padding: 24px;color: #1f2937">
           <div style="background:#fef2f2;border-left:4px solid #ef4444;padding:16px;margin-bottom:24px">
@@ -796,17 +809,13 @@ services:
         branch: main
         status: [failure]
     settings:
-      host: { from_secret: SMTP_HOST }
-      port: 587
-      username: { from_secret: SMTP_USERNAME }
-      password: { from_secret: SMTP_PASSWORD }
-      from: { from_secret: SMTP_USERNAME }
+      dsn: { from_secret: SMTP_DSN }
+      from.address: { from_secret: SMTP_USERNAME }
       recipients: { from_secret: NOTIFY_EMAIL }
       recipients_only: true
-      subject: >-
+      content.subject: >-
         ❌ [KPS] Pipeline failed BEFORE deploy — ${CI_COMMIT_SHA:0:7}
-      content_type: text/html
-      body: |
+      content.body: |
         <html>
         <body style="font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width: 640px;margin: 0 auto;padding: 24px;color: #1f2937">
           <div style="background:#fef2f2;border-left:4px solid #ef4444;padding:16px;margin-bottom:24px">
