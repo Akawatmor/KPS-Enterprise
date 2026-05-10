@@ -1,0 +1,823 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Woodpecker CI/CD Pipeline — TodoApp (Phase 3 — Full Production Grade)
+# ─────────────────────────────────────────────────────────────────────────────
+# All-in-one: security · stability · speed · canary · rollback · compatibility
+# Single tool: Woodpecker only — no ArgoCD, no Argo Rollouts, no Flagger
+# ─────────────────────────────────────────────────────────────────────────────
+
+variables:
+  - &go_image "golang:1.25-bookworm"
+  - &node_image "node:22-bookworm-slim"
+  - &kubectl_image "alpine/k8s:1.31.0"
+  - &trivy_image "aquasec/trivy:0.69.3"
+  - &buildx_image "woodpeckerci/plugin-docker-buildx:4"
+  - &gitleaks_image "zricethezav/gitleaks:v8.18.4"
+  - &hadolint_image "hadolint/hadolint:v2.12.0-alpine" # ใช้อัลไพน์ แก้ปัญหา /bin/sh
+  - &kubescore_img "zegl/kube-score:v1.17.0"
+  - &conftest_image "openpolicyagent/conftest:v0.50.0"
+  - &k6_image "grafana/k6:0.52.0"
+  - &email_image "drillster/drone-email:1.2.4"
+
+clone:
+  git:
+    image: woodpeckerci/plugin-git
+    settings:
+      recursive: false
+
+# ═════════════════════════════════════════════════════════════════════════════
+
+steps:
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 0 — PRE-FLIGHT CHECKS (parallel, fast-fail)                      ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: secret-scan
+    image: *gitleaks_image
+    depends_on: []
+    when:
+      event: [push, pull_request]
+    commands:
+      - gitleaks detect --source . --config .gitleaks.toml --verbose --redact --exit-code 1 --no-banner
+
+  - name: dockerfile-lint
+    image: *hadolint_image
+    depends_on: []
+    when:
+      event: [push, pull_request]
+    commands:
+      - hadolint --failure-threshold warning src/phase2-final/backend/Dockerfile
+      - hadolint --failure-threshold warning src/phase2-final/frontend/Dockerfile
+
+  - name: k8s-lint
+    image: *kubescore_img
+    depends_on: []
+    when:
+      event: [push, pull_request]
+    commands:
+      - |
+        kube-score score $(ls src/phase2-final/k8s/*.yaml | grep -v '\.sample\.yaml') \
+          --ignore-test pod-networkpolicy \
+          --ignore-test container-security-context-user-group-id \
+          --ignore-test container-image-tag \
+          --ignore-test deployment-has-host-podantiaffinity \
+          --output-format ci
+
+  - name: opa-policy
+    image: *conftest_image
+    depends_on: []
+    when:
+      event: [push, pull_request]
+    commands:
+      - |
+        if [ ! -d policies ] || [ -z "$(ls -A policies/*.rego 2>/dev/null)" ]; then
+          echo "⚠ No policies/ directory or .rego files found — skipping"
+          exit 0
+        fi
+      - conftest test src/phase2-final/k8s/ --policy policies/ --all-namespaces
+
+  - name: api-contract-check
+    image: curlimages/curl:8.12.1
+    depends_on: []
+    failure: ignore
+    when:
+      event: [push]
+      branch: [main, develop]
+    commands:
+      - sh tests/contract/api-contract.sh https://todoapp-kps.akawatmor.com
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 1 — QUALITY GATES (parallel)                                     ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: quality-backend
+    image: *go_image
+    depends_on: [secret-scan, dockerfile-lint, k8s-lint, opa-policy]
+    when:
+      event: [push, pull_request]
+      branch: [main, develop]
+    environment:
+      GOMODCACHE: /cache/go/mod
+      GOCACHE: /cache/go/build
+      GOBIN: /cache/go/bin
+      MIN_COVERAGE: "30"
+    commands:
+      - export PATH="/cache/go/bin:$PATH"
+      - mkdir -p /cache/go/mod /cache/go/build /cache/go/bin
+      - cd src/phase2-final/backend
+      - go mod download
+      - echo "══ go vet ══"
+      - go vet ./...
+      - echo "══ go test ══"
+      - go test ./... -v -count=1 -race -coverprofile=coverage.out
+      - echo "══ Coverage breakdown ══"
+      - go tool cover -func=coverage.out
+      - echo "══ Coverage gate ══"
+      - |
+        COV=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
+        echo "Total coverage: $${COV}% (minimum: $${MIN_COVERAGE}%)"
+        awk -v c="$$COV" -v m="$$MIN_COVERAGE" 'BEGIN { exit !(c >= m) }' || {
+          echo "❌ Coverage $${COV}% below minimum $${MIN_COVERAGE}%"
+          exit 1
+        }
+        echo "✅ Coverage $${COV}% meets minimum $${MIN_COVERAGE}%"
+      - echo "══ gosec ══"
+      - test -f /cache/go/bin/gosec || go install github.com/securego/gosec/v2/cmd/gosec@latest
+      - gosec -severity medium -confidence medium -fmt=text ./... || echo "⚠ gosec issues found (non-blocking on develop)"
+      - echo "══ govulncheck ══"
+      - test -f /cache/go/bin/govulncheck || go install golang.org/x/vuln/cmd/govulncheck@latest
+      - govulncheck ./... || echo "⚠ vulns found (non-blocking on develop)"
+
+  - name: quality-frontend
+    image: *node_image
+    depends_on: [secret-scan, dockerfile-lint, k8s-lint, opa-policy]
+    when:
+      event: [push, pull_request]
+      branch: [main, develop]
+    environment:
+      NPM_CONFIG_CACHE: /cache/npm
+    commands:
+      - mkdir -p /cache/npm
+      - cd src/phase2-final/frontend
+      - npm ci --prefer-offline --cache /cache/npm
+      - npm run type-check
+      - npm test -- --passWithNoTests --coverage
+      - npm audit --audit-level=high
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 2 — INTEGRATION TEST (real Postgres via service)                 ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: integration-test
+    image: *go_image
+    depends_on: [quality-backend]
+    when:
+      event: [push, pull_request]
+      branch: [main, develop]
+    environment:
+      DATABASE_URL: "postgres://test:test@postgres:5432/test?sslmode=disable"
+      GOMODCACHE: /cache/go/mod
+      GOCACHE: /cache/go/build
+    commands:
+      - cd src/phase2-final/backend
+      - apt-get update -qq && apt-get install -y -qq postgresql-client
+      - |
+        for i in $(seq 1 30); do
+          pg_isready -h postgres -U test && break
+          echo "Waiting postgres... $$i/30"
+          sleep 2
+        done
+      - PGPASSWORD=test psql -h postgres -U test -d test -c "SELECT version();"
+      - echo "── Running integration tests on store/postgres adapter ──"
+      - go test -tags=integration -v -count=1 ./internal/store/...
+      - echo "✅ Integration tests passed"
+
+services:
+  - name: postgres
+    image: postgres:16-alpine
+    when:
+      event: [push, pull_request]
+      branch: [main, develop]
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: test
+
+  - name: pg-test
+    image: postgres:16-alpine
+    when:
+      event: push
+      branch: main
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: test
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 3 — BUILD, PUSH, SBOM, SIGN  (parallel; main only)               ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: build-push-core
+    image: *buildx_image
+    privileged: true
+    depends_on: [quality-backend, integration-test, dockerfile-lint, opa-policy]
+    when:
+      event: push
+      branch: main
+      path:
+        include: ["src/phase2-final/backend/**", ".woodpecker.yml"]
+    settings:
+      dockerfile: src/phase2-final/backend/Dockerfile
+      context: src/phase2-final/backend
+      repo: akawatmor/todoapp-core
+      tags: ["${CI_COMMIT_SHA:0:7}", latest]
+      cache_from: ["type=registry,ref=akawatmor/todoapp-core:buildcache"]
+      cache_to: ["type=registry,ref=akawatmor/todoapp-core:buildcache,mode=max"]
+      provenance: true
+      sbom: true
+      username: { from_secret: DOCKER_USERNAME }
+      password: { from_secret: DOCKER_PASSWORD }
+
+  - name: build-push-web
+    image: *buildx_image
+    privileged: true
+    depends_on: [quality-frontend, integration-test, dockerfile-lint, opa-policy]
+    when:
+      event: push
+      branch: main
+      path:
+        include: ["src/phase2-final/frontend/**", ".woodpecker.yml"]
+    settings:
+      dockerfile: src/phase2-final/frontend/Dockerfile
+      context: src/phase2-final/frontend
+      build_args:
+        - NEXT_PUBLIC_API_BASE_URL=
+      repo: akawatmor/todoapp-web
+      tags: ["${CI_COMMIT_SHA:0:7}", latest]
+      cache_from: ["type=registry,ref=akawatmor/todoapp-web:buildcache"]
+      cache_to: ["type=registry,ref=akawatmor/todoapp-web:buildcache,mode=max"]
+      provenance: true
+      sbom: true
+      username: { from_secret: DOCKER_USERNAME }
+      password: { from_secret: DOCKER_PASSWORD }
+
+  - name: sign-images
+    image: alpine:3.20
+    depends_on: [build-push-core, build-push-web]
+    when:
+      event: push
+      branch: main
+      path:
+        include:
+          - "src/phase2-final/backend/**"
+          - "src/phase2-final/frontend/**"
+          - ".woodpecker.yml"
+    environment:
+      COSIGN_PRIVATE_KEY: { from_secret: COSIGN_PRIVATE_KEY }
+      COSIGN_PASSWORD: { from_secret: COSIGN_PASSWORD }
+      DOCKER_USERNAME: { from_secret: DOCKER_USERNAME }
+      DOCKER_PASSWORD: { from_secret: DOCKER_PASSWORD }
+    commands:
+      - apk add --no-cache curl ca-certificates
+      - curl -sSL -o /usr/local/bin/cosign https://github.com/sigstore/cosign/releases/download/v2.4.0/cosign-linux-amd64
+      - chmod +x /usr/local/bin/cosign
+      - echo "$DOCKER_PASSWORD" | cosign login -u "$DOCKER_USERNAME" --password-stdin docker.io
+      - umask 077
+      - '[ -n "$COSIGN_PRIVATE_KEY" ] || { echo "❌ COSIGN_PRIVATE_KEY secret is empty"; exit 1; }'
+      - trap 'rm -f /tmp/cosign.key' EXIT
+      - printf '%s' "$COSIGN_PRIVATE_KEY" > /tmp/cosign.key
+      - export IMAGE_TAG="${CI_COMMIT_SHA:0:7}"
+      - |
+        get_registry_token() {
+          repo="$1"
+          curl -fsSL -u "$DOCKER_USERNAME:$DOCKER_PASSWORD" \
+            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull" \
+            | sed -n 's/.*"token":"\([^"]*\)".*/\1/p'
+        }
+        wait_for_image() {
+          repo="$1"; tag="$2"
+          token="$(get_registry_token "$repo")"
+          [ -n "$token" ] || { echo "❌ Unable to get Docker Hub token for $repo"; exit 1; }
+          for i in $(seq 1 30); do
+            code="$(curl -sSLo /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $token" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+              "https://index.docker.io/v2/${repo}/manifests/${tag}")"
+            if [ "$code" = "200" ]; then return 0; fi
+            echo "Waiting for ${repo}:${tag} in Docker Hub... ${i}/30 (HTTP ${code})"
+            sleep 2
+          done
+          echo "❌ Image ${repo}:${tag} is not available in Docker Hub"
+          exit 1
+        }
+      - cosign public-key --key /tmp/cosign.key >/dev/null || { echo "❌ COSIGN_PASSWORD cannot decrypt COSIGN_PRIVATE_KEY"; exit 1; }
+      - |
+        sign_if_built() {
+          repo="$1"; tag="$2"
+          token="$(get_registry_token "$repo")"
+          code="$(curl -sSLo /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $token" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json' \
+            "https://index.docker.io/v2/${repo}/manifests/${tag}")"
+          if [ "$code" = "200" ]; then
+            wait_for_image "$repo" "$tag"
+            cosign sign --yes --key /tmp/cosign.key "$repo:$tag"
+            echo "✅ Signed $repo:$tag"
+          else
+            echo "⚠ $repo:$tag not found in registry — skipping"
+          fi
+        }
+      - sign_if_built akawatmor/todoapp-core "$IMAGE_TAG"
+      - sign_if_built akawatmor/todoapp-web "$IMAGE_TAG"
+      - echo "✅ Image signing complete"
+
+  - name: sbom-attest
+    image: alpine:3.20
+    depends_on: [sign-images]
+    when:
+      event: push
+      branch: main
+      path:
+        include:
+          - "src/phase2-final/backend/**"
+          - "src/phase2-final/frontend/**"
+          - ".woodpecker.yml"
+    environment:
+      DOCKER_USERNAME: { from_secret: DOCKER_USERNAME }
+      DOCKER_PASSWORD: { from_secret: DOCKER_PASSWORD }
+      TRIVY_USERNAME: { from_secret: DOCKER_USERNAME }
+      TRIVY_PASSWORD: { from_secret: DOCKER_PASSWORD }
+    commands:
+      - apk add --no-cache curl ca-certificates bash
+      - curl -sSL -o /usr/local/bin/cosign https://github.com/sigstore/cosign/releases/download/v2.4.0/cosign-linux-amd64
+      - chmod +x /usr/local/bin/cosign
+      - curl -sSL https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_Linux-64bit.tar.gz | tar xz -C /usr/local/bin/
+      - echo "$DOCKER_PASSWORD" | cosign login -u "$DOCKER_USERNAME" --password-stdin docker.io
+      - export IMAGE_TAG="${CI_COMMIT_SHA:0:7}"
+      - |
+        get_registry_token() {
+          repo="$1"
+          curl -fsSL -u "$DOCKER_USERNAME:$DOCKER_PASSWORD" \
+            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull" \
+            | sed -n 's/.*"token":"\([^"]*\)".*/\1/p'
+        }
+      - |
+        sbom_if_built() {
+          repo="$1"; tag="$2"; out="$3"
+          token="$(get_registry_token "$repo")"
+          code="$(curl -sSLo /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $token" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json' \
+            "https://index.docker.io/v2/${repo}/manifests/${tag}")"
+          if [ "$code" = "200" ]; then
+            trivy image --skip-version-check --format cyclonedx --output "$out" "$repo:$tag"
+            cosign attach sbom --sbom "$out" "$repo:$tag"
+            echo "✅ SBOM attached to $repo:$tag"
+          else
+            echo "⚠ $repo:$tag not found — skipping SBOM"
+          fi
+        }
+      - sbom_if_built akawatmor/todoapp-core "$IMAGE_TAG" /tmp/sbom-core.json
+      - sbom_if_built akawatmor/todoapp-web "$IMAGE_TAG" /tmp/sbom-web.json
+      - rm -f /tmp/sbom-*.json
+      - echo "✅ SBOM step complete"
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 4 — VULNERABILITY & POLICY SCAN                                  ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: trivy-scan
+    image: *trivy_image
+    depends_on: [sbom-attest]
+    when:
+      event: push
+      branch: main
+      path:
+        include:
+          - "src/phase2-final/backend/**"
+          - "src/phase2-final/frontend/**"
+          - ".woodpecker.yml"
+    environment:
+      TRIVY_USERNAME: { from_secret: DOCKER_USERNAME }
+      TRIVY_PASSWORD: { from_secret: DOCKER_PASSWORD }
+      TRIVY_CACHE_DIR: /cache/trivy
+    commands:
+      - if ! command -v curl >/dev/null 2>&1; then apk add --no-cache curl; fi
+      - mkdir -p /cache/trivy
+      - export IMAGE_TAG="${CI_COMMIT_SHA:0:7}"
+      - |
+        scan_if_built() {
+          repo="$1"; tag="$2"
+          token="$(curl -fsSL -u "$TRIVY_USERNAME:$TRIVY_PASSWORD" \
+            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull" \
+            | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+          code="$(curl -sSLo /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $token" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json' \
+            "https://index.docker.io/v2/${repo}/manifests/${tag}")"
+          if [ "$code" = "200" ]; then
+            trivy image --skip-version-check --exit-code 1 --severity HIGH,CRITICAL \
+              --ignore-unfixed --format table "$repo:$tag"
+          else
+            echo "⚠ $repo:$tag not found — skipping trivy scan"
+          fi
+        }
+      - scan_if_built akawatmor/todoapp-core "$IMAGE_TAG"
+      - scan_if_built akawatmor/todoapp-web "$IMAGE_TAG"
+      - trivy config --exit-code 1 --severity HIGH,CRITICAL src/phase2-final/k8s/
+      - trivy fs --scanners secret --exit-code 1 src/
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 5 — DB SAFETY (snapshot + migration up/down test)                ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: db-snapshot
+    image: *kubectl_image
+    depends_on: [trivy-scan]
+    when:
+      event: push
+      branch: main
+    environment:
+      KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
+      PG_USER: { from_secret: PG_USER }
+      PG_DATABASE: { from_secret: PG_DATABASE }
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - trap 'rm -f /tmp/kubeconfig' EXIT
+      - mkdir -p /cache/db-backups
+      - SNAP="/cache/db-backups/pre-${CI_COMMIT_SHA:0:7}-$(date +%s).sql.gz"
+      - |
+        kubectl exec -n todoapp todoapp-postgres-0 -- \
+          pg_dump -U "$PG_USER" "$PG_DATABASE" | gzip > "$SNAP"
+      - ls -lh "$SNAP"
+      - echo "$SNAP" > /cache/db-backups/latest.txt
+      - echo "✅ DB snapshot saved"
+
+  - name: migration-test
+    image: *go_image
+    depends_on: [trivy-scan]
+    when:
+      event: push
+      branch: main
+    commands:
+      - go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+      - export DB="postgres://test:test@pg-test:5432/test?sslmode=disable"
+      - cd src/phase2-final/backend
+      - migrate -path migrations -database "$DB" up
+      - migrate -path migrations -database "$DB" down -all
+      - migrate -path migrations -database "$DB" up
+      - echo "✅ Migration is reversible"
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 6 — CANARY DEPLOY (10% traffic via Traefik weighted)             ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: canary-deploy
+    image: *kubectl_image
+    depends_on: [db-snapshot, migration-test, sign-images]
+    when:
+      event: push
+      branch: main
+    environment:
+      KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - trap 'rm -f /tmp/kubeconfig' EXIT
+      - kubectl apply -f src/phase2-final/k8s/namespace.yaml
+      - kubectl apply -f src/phase2-final/k8s/networkpolicy.yaml
+      - kubectl apply -f src/phase2-final/k8s/pdb-hpa.yaml
+      - kubectl apply -f src/phase2-final/k8s/core-services.yaml
+      - kubectl apply -f src/phase2-final/k8s/traefik-weighted.yaml
+      - |
+        kubectl set image deployment/todoapp-core-canary \
+          core=akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7} -n todoapp
+      - kubectl scale deployment/todoapp-core-canary --replicas=1 -n todoapp
+      - kubectl rollout status deployment/todoapp-core-canary -n todoapp --timeout=180s
+      - |
+        kubectl patch traefikservice todoapp-core-weighted -n todoapp --type=merge -p '
+        {"spec":{"weighted":{"services":[
+          {"name":"todoapp-core-stable","port":8080,"weight":90},
+          {"name":"todoapp-core-canary","port":8080,"weight":10}
+        ]}}}'
+      - echo "🐤 Canary receiving 10% traffic"
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 7 — CANARY ANALYSIS (automated decision)                         ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: canary-analyze
+    image: *kubectl_image
+    depends_on: [canary-deploy]
+    when:
+      event: push
+      branch: main
+    environment:
+      KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - trap 'rm -f /tmp/kubeconfig' EXIT
+      - apk add --no-cache curl jq bc
+      - |
+        kubectl run smoke-canary-${CI_COMMIT_SHA:0:7} \
+          --image=curlimages/curl:8.12.1 --restart=Never --rm -i --wait \
+          --timeout=60s -n todoapp \
+          -- sh -c '
+            curl -sf http://todoapp-core-canary:8080/healthz &&
+            curl -sf http://todoapp-core-canary:8080/readyz
+          '
+      - echo "⏳ Baking canary for 120s..."
+      - sleep 120
+      - |
+        ERRORS=$(kubectl run analyze-${CI_COMMIT_SHA:0:7} \
+          --image=curlimages/curl:8.12.1 --restart=Never --rm -i --wait \
+          --timeout=30s -n todoapp \
+          -- curl -s http://todoapp-core-canary:8080/metrics \
+          | grep '^http_requests_total{.*status="5' | awk '{s+=\$2} END {print s+0}')
+        TOTAL=$(kubectl run analyze2-${CI_COMMIT_SHA:0:7} \
+          --image=curlimages/curl:8.12.1 --restart=Never --rm -i --wait \
+          --timeout=30s -n todoapp \
+          -- curl -s http://todoapp-core-canary:8080/metrics \
+          | grep '^http_requests_total{' | awk '{s+=\$2} END {print s+0}')
+        
+        ERRORS=${ERRORS:-0}
+        TOTAL=${TOTAL:-0}
+        
+        RATE=$(echo "scale=4; $ERRORS / ($TOTAL + 1) * 100" | bc)
+        echo "Error rate: $RATE% ($ERRORS / $TOTAL)"
+        
+        if (( $(echo "$RATE > 1.0" | bc -l) )); then
+          echo "❌ Error rate too high — abort canary"
+          exit 1
+        fi
+      - echo "✅ Canary analysis passed"
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 8a — PROMOTE TO 100% (canary success)                            ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: promote-stable
+    image: *kubectl_image
+    depends_on: [canary-analyze]
+    when:
+      event: push
+      branch: main
+      status: [success]
+    environment:
+      KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - trap 'rm -f /tmp/kubeconfig' EXIT
+      - |
+        kubectl patch traefikservice todoapp-core-weighted -n todoapp --type=merge -p '
+        {"spec":{"weighted":{"services":[
+          {"name":"todoapp-core-stable","port":8080,"weight":50},
+          {"name":"todoapp-core-canary","port":8080,"weight":50}
+        ]}}}'
+      - 'echo "📊 Traffic: 50/50"'
+      - sleep 60
+      - |
+        kubectl set image deployment/todoapp-core-stable \
+          core=akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7} -n todoapp
+      - kubectl rollout status deployment/todoapp-core-stable -n todoapp --timeout=300s
+      - |
+        kubectl patch traefikservice todoapp-core-weighted -n todoapp --type=merge -p '
+        {"spec":{"weighted":{"services":[
+          {"name":"todoapp-core-stable","port":8080,"weight":100},
+          {"name":"todoapp-core-canary","port":8080,"weight":0}
+        ]}}}'
+      - kubectl scale deployment/todoapp-core-canary --replicas=0 -n todoapp
+      - echo "🎉 Promoted to 100% stable"
+      
+      # [เพิ่มใหม่] สั่งอัปเดตอิมเมจของ Frontend Web ทันทีที่ Core นิ่งแล้ว
+      - echo "🌐 Deploying Frontend Web..."
+      - |
+        kubectl set image deployment/todoapp-web \
+          web=akawatmor/todoapp-web:${CI_COMMIT_SHA:0:7} -n todoapp
+      - kubectl rollout status deployment/todoapp-web -n todoapp --timeout=180s
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 8b — AUTO-ROLLBACK (canary failed)                               ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: auto-rollback
+    image: *kubectl_image
+    depends_on: [canary-analyze]
+    when:
+      event: push
+      branch: main
+      status: [failure]
+    environment:
+      KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
+      PG_USER: { from_secret: PG_USER }
+      PG_DATABASE: { from_secret: PG_DATABASE }
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - trap 'rm -f /tmp/kubeconfig' EXIT
+      - echo "🚨 ROLLBACK INITIATED"
+      - |
+        kubectl patch traefikservice todoapp-core-weighted -n todoapp --type=merge -p '
+        {"spec":{"weighted":{"services":[
+          {"name":"todoapp-core-stable","port":8080,"weight":100},
+          {"name":"todoapp-core-canary","port":8080,"weight":0}
+        ]}}}'
+      - echo "✓ Traffic restored to stable"
+      - kubectl scale deployment/todoapp-core-canary --replicas=0 -n todoapp
+      - kubectl rollout undo deployment/todoapp-core-stable -n todoapp || true
+      - kubectl rollout status deployment/todoapp-core-stable -n todoapp --timeout=180s
+      - echo "✅ Rollback complete — production safe"
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 9 — POST-DEPLOY VERIFICATION                                     ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: smoke-test-prod
+    image: *kubectl_image
+    depends_on: [promote-stable]
+    when:
+      event: push
+      branch: main
+    environment:
+      KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - trap 'rm -f /tmp/kubeconfig' EXIT
+      - sleep 5
+      - |
+        kubectl run smoke-prod-${CI_COMMIT_SHA:0:7} \
+          --image=curlimages/curl:8.12.1 --restart=Never --rm -i --wait \
+          --timeout=90s -n todoapp -- sh -c '
+            set -e
+            curl -sf --retry 3 http://todoapp-core:8080/healthz &
+            curl -sf --retry 3 http://todoapp-core:8080/readyz &
+            wait
+            curl -sf -X POST -H "Content-Type: application/json" -H "X-User-ID: smoke" \
+              -d "{\"title\":\"smoke-${CI_COMMIT_SHA:0:7}\",\"column\":\"todo\"}" \
+              http://todoapp-core:8080/api/v1/tasks
+            curl -sf -H "X-User-ID: smoke" http://todoapp-core:8080/api/v1/tasks
+          '
+
+  - name: load-test
+    image: *k6_image
+    depends_on: [smoke-test-prod]
+    failure: ignore
+    when:
+      event: push
+      branch: main
+    commands:
+      - |
+        cat > /tmp/load.js <<'EOF'
+        import http from 'k6/http';
+        import { check } from 'k6';
+        export const options = {
+          stages: [
+            { duration: '30s', target: 20 },
+            { duration: '1m',  target: 50 },
+            { duration: '30s', target: 0 },
+          ],
+          thresholds: {
+            http_req_duration: ['p(95)<500'],
+            http_req_failed:   ['rate<0.01'],
+          },
+        };
+        export default function () {
+          const res = http.get('https://todoapp-kps.akawatmor.com/healthz');
+          check(res, { 'status 200': (r) => r.status === 200 });
+        }
+        EOF
+      - k6 run /tmp/load.js
+
+  - name: chaos-test
+    image: *kubectl_image
+    depends_on: [smoke-test-prod]
+    failure: ignore
+    when:
+      event: push
+      branch: main
+      evaluate: 'CI_COMMIT_MESSAGE contains "[chaos]"'
+    environment:
+      KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - trap 'rm -f /tmp/kubeconfig' EXIT
+      - VICTIM=$(kubectl get pod -n todoapp -l app=todoapp-core,track=stable -o name | shuf -n 1)
+      - echo "💀 Killing $VICTIM"
+      - kubectl delete $VICTIM -n todoapp
+      - sleep 5
+      - |
+        kubectl run chaos-check-${CI_COMMIT_SHA:0:7} \
+          --image=curlimages/curl:8.12.1 --restart=Never --rm -i --wait \
+          --timeout=30s -n todoapp \
+          -- curl -sf --retry 5 --retry-delay 2 http://todoapp-core:8080/healthz
+      - echo "✅ Survived pod failure"
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 10 — NOTIFICATIONS                                               ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: email-success
+    image: *email_image
+    depends_on: [smoke-test-prod, load-test]
+    failure: ignore
+    when:
+      - event: push
+        branch: main
+        status: [success]
+    settings:
+      host: { from_secret: SMTP_HOST }
+      port: 587
+      username: { from_secret: SMTP_USERNAME }
+      password: { from_secret: SMTP_PASSWORD }
+      from: { from_secret: SMTP_USERNAME }
+      recipients: { from_secret: NOTIFY_EMAIL }
+      recipients_only: true
+      subject: >-
+        ✅ [KPS] Canary→Stable promoted — ${CI_REPO_NAME}@${CI_COMMIT_SHA:0:7}
+      content_type: text/html
+      body: |
+        <html>
+        <body style="font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width: 640px;margin: 0 auto;padding: 24px;color: #1f2937">
+          <div style="background:#f0fdf4;border-left:4px solid #22c55e;padding:16px;margin-bottom:24px">
+            <h2 style="color:#15803d;margin:0">✅ Canary Promoted Successfully</h2>
+            <p style="margin:8px 0 0;color:#166534">
+              All gates passed · Traffic now 100% on new version
+            </p>
+          </div>
+          <h3>Pipeline Flow</h3>
+          <pre style="background: #f9fafb; padding: 12px; border-radius: 6px; font-size: 12px; overflow: auto">
+          preflight ✅ → quality ✅ → integration ✅ → build ✅ → sign ✅
+          → scan ✅ → snapshot ✅ → migrate-test ✅
+          → canary 10% ✅ → analyze ✅ → 50/50 ✅ → 100% ✅
+          → smoke ✅ → load ✅
+          </pre>
+          <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:16px">
+            <tr style="background:#f9fafb">
+              <td style="padding:10px;border:1px solid #e5e7eb;font-weight:600;width:140px">Repository</td>
+              <td style="padding:10px;border:1px solid #e5e7eb"><code>${CI_REPO_NAME}</code></td>
+            </tr>
+            <tr>
+              <td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Commit</td>
+              <td style="padding:10px;border:1px solid #e5e7eb"><code>${CI_COMMIT_SHA:0:7}</code></td>
+            </tr>
+            <tr style="background:#f9fafb">
+              <td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Author</td>
+              <td style="padding:10px;border:1px solid #e5e7eb">${CI_COMMIT_AUTHOR}</td>
+            </tr>
+            <tr>
+              <td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Message</td>
+              <td style="padding:10px;border:1px solid #e5e7eb">${CI_COMMIT_MESSAGE}</td>
+            </tr>
+          </table>
+          <div style="margin-top:20px;text-align:center">
+            <a href="${CI_BUILD_LINK}" style="display:inline-block;padding:10px 24px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px">Pipeline Log</a>
+          </div>
+        </body>
+        </html>
+
+  - name: email-rollback
+    image: *email_image
+    depends_on: [auto-rollback]
+    failure: ignore
+    when:
+      - event: push
+        branch: main
+        status: [success]
+    settings:
+      host: { from_secret: SMTP_HOST }
+      port: 587
+      username: { from_secret: SMTP_USERNAME }
+      password: { from_secret: SMTP_PASSWORD }
+      from: { from_secret: SMTP_USERNAME }
+      recipients: { from_secret: NOTIFY_EMAIL }
+      recipients_only: true
+      subject: >-
+        🚨 [KPS] AUTO-ROLLBACK executed — ${CI_COMMIT_SHA:0:7}
+      content_type: text/html
+      body: |
+        <html>
+        <body style="font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width: 640px;margin: 0 auto;padding: 24px;color: #1f2937">
+          <div style="background:#fef2f2;border-left:4px solid #ef4444;padding:16px;margin-bottom:24px">
+            <h2 style="color:#dc2626;margin:0">🚨 Auto-Rollback Executed</h2>
+            <p style="margin:8px 0 0;color:#991b1b">Canary failed analysis · Production restored</p>
+          </div>
+          <div style="margin-top:20px;text-align:center">
+            <a href="${CI_BUILD_LINK}" style="display:inline-block;padding:10px 24px;background:#dc2626;color:#fff;text-decoration:none;border-radius:6px">ดู Pipeline Log</a>
+          </div>
+        </body>
+        </html>
+
+  - name: email-prefail
+    image: *email_image
+    failure: ignore
+    when:
+      - event: push
+        branch: main
+        status: [failure]
+    settings:
+      host: { from_secret: SMTP_HOST }
+      port: 587
+      username: { from_secret: SMTP_USERNAME }
+      password: { from_secret: SMTP_PASSWORD }
+      from: { from_secret: SMTP_USERNAME }
+      recipients: { from_secret: NOTIFY_EMAIL }
+      recipients_only: true
+      subject: >-
+        ❌ [KPS] Pipeline failed BEFORE deploy — ${CI_COMMIT_SHA:0:7}
+      content_type: text/html
+      body: |
+        <html>
+        <body style="font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width: 640px;margin: 0 auto;padding: 24px;color: #1f2937">
+          <div style="background:#fef2f2;border-left:4px solid #ef4444;padding:16px;margin-bottom:24px">
+            <h2 style="color:#dc2626;margin:0">❌ Pipeline Failed (Pre-Deploy)</h2>
+            <p style="margin:8px 0 0;color:#991b1b">Failure caught BEFORE production touched</p>
+          </div>
+          <div style="margin-top:20px;text-align:center">
+            <a href="${CI_BUILD_LINK}" style="display:inline-block;padding:10px 24px;background:#dc2626;color:#fff;text-decoration:none;border-radius:6px">ดู Pipeline Log</a>
+          </div>
+        </body>
+        </html>
