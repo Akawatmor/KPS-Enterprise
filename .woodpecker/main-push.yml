@@ -242,6 +242,8 @@ steps:
   - name: canary-analyze
     image: *kubectl_image
     depends_on: [canary-deploy]
+    environment:
+      KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
     commands:
       - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
       - export KUBECONFIG=/tmp/kubeconfig
