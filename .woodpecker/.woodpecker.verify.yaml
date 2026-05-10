@@ -123,31 +123,62 @@ steps:
 # INTEGRATION
 # =============================================================================
 
+  # - name: integration-test
+  #   image: *go_image
+
+  #   depends_on:
+  #     - quality-gate
+
+  #   environment:
+  #     DATABASE_URL: postgres://test:test@postgres:5432/test?sslmode=disable
+
+  #   commands:
+  #     - apt-get update -qq
+  #     - apt-get install -y -qq postgresql-client
+
+  #     - |
+  #       for i in $(seq 1 30); do
+  #         pg_isready -h postgres -U test && break
+  #         sleep 2
+  #       done
+
+  #     - cd src/phase2-final/backend
+
+  #     - go test -tags=integration ./internal/store/... -v
+
   - name: integration-test
     image: *go_image
-
     depends_on:
       - quality-gate
-
     environment:
       DATABASE_URL: postgres://test:test@postgres:5432/test?sslmode=disable
-
     commands:
-      - apt-get update -qq
-      - apt-get install -y -qq postgresql-client
-
+      # 1. รอ Database โดยไม่ใช้ pg_isready (ใช้ /dev/tcp ของ Bash)
       - |
+        echo "Waiting for postgres..."
         for i in $(seq 1 30); do
-          pg_isready -h postgres -U test && break
+          if (echo > /dev/tcp/postgres/5432) >/dev/null 2>&1; then
+            echo "Postgres is up!"
+            break
+          fi
           sleep 2
         done
 
+      # 2. ติดตั้ง migrate แบบเร็ว (โหลด binary ตรงๆ) หรือใช้ go install -tags
+      - go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+      - export PATH=$PATH:$(go env GOPATH)/bin
+      
       - cd src/phase2-final/backend
+      
+      # 3. รัน Migration ก่อนเพื่อให้ Database มี Schema พร้อมสำหรับ Test
+      - migrate -path migrations -database "$DATABASE_URL" up
 
+      # 4. รัน Integration Test
       - go test -tags=integration ./internal/store/... -v
 
   - name: migration-test
-    image: *go_image
+    #image: *go_image
+    image: migrate/migrate
 
     depends_on:
       - integration-test
