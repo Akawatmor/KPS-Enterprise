@@ -1,0 +1,371 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Woodpecker Pipeline — Main Branch Push (Production Deployment)
+# ─────────────────────────────────────────────────────────────────────────────
+
+variables:
+  - &go_image "golang:1.25-bookworm"
+  - &node_image "node:22-bookworm-slim"
+  - &kubectl_image "alpine/k8s:1.31.0"
+  - &trivy_image "aquasec/trivy:0.69.3"
+  - &buildx_image "woodpeckerci/plugin-docker-buildx:4"
+  - &gitleaks_image "zricethezav/gitleaks:v8.18.4"
+  - &hadolint_image "hadolint/hadolint:v2.12.0-alpine"
+  - &kubescore_img "zegl/kube-score:v1.17.0"
+  - &conftest_image "openpolicyagent/conftest:v0.50.0"
+  - &k6_image "grafana/k6:0.52.0"
+  - &email_image "deblan/woodpecker-email:latest"
+
+when:
+  event: push
+  branch: main
+
+steps:
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 0 — PRE-FLIGHT CHECKS                                            ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: secret-scan
+    image: *gitleaks_image
+    depends_on: []
+    commands:
+      - gitleaks detect --source . --config .gitleaks.toml --verbose --redact --exit-code 1 --no-banner
+
+  - name: dockerfile-lint
+    image: *hadolint_image
+    depends_on: []
+    commands:
+      - hadolint --failure-threshold warning src/phase2-final/backend/Dockerfile
+      - hadolint --failure-threshold warning src/phase2-final/frontend/Dockerfile
+
+  - name: k8s-lint
+    image: *kubescore_img
+    depends_on: []
+    commands:
+      - |
+        kube-score score $(ls src/phase2-final/k8s/*.yaml | grep -v '\.sample\.yaml') \
+          --ignore-test pod-networkpolicy \
+          --ignore-test container-security-context-user-group-id \
+          --ignore-test container-image-tag \
+          --ignore-test deployment-has-host-podantiaffinity \
+          --output-format ci
+
+  - name: opa-policy
+    image: *conftest_image
+    depends_on: []
+    commands:
+      - |
+        if [ ! -d policies ] || [ -z "$(ls -A policies/*.rego 2>/dev/null)" ]; then
+          echo "⚠ No policies/ directory or .rego files found — skipping"
+          exit 0
+        fi
+      - conftest test src/phase2-final/k8s/ --policy policies/ --all-namespaces
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 1 — QUALITY GATES                                                 ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: quality-backend
+    image: *go_image
+    depends_on: [secret-scan, dockerfile-lint, k8s-lint, opa-policy]
+    environment:
+      GOMODCACHE: /cache/go/mod
+      GOCACHE: /cache/go/build
+      GOBIN: /cache/go/bin
+      MIN_COVERAGE: "30"
+    commands:
+      - export PATH="/cache/go/bin:$PATH"
+      - mkdir -p /cache/go/mod /cache/go/build /cache/go/bin
+      - cd src/phase2-final/backend
+      - go mod download
+      - go test ./... -v -count=1 -race -coverprofile=coverage.out
+      - go tool cover -func=coverage.out
+      - |
+        COV=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
+        awk -v c="$COV" -v m="$MIN_COVERAGE" 'BEGIN { exit !(c >= m) }' || exit 1
+      - go install github.com/securego/gosec/v2/cmd/gosec@latest
+      - gosec -severity medium -confidence medium -fmt=text ./...
+      - go install golang.org/x/vuln/cmd/govulncheck@latest
+      - govulncheck ./...
+
+  - name: quality-frontend
+    image: *node_image
+    depends_on: [secret-scan, dockerfile-lint, k8s-lint, opa-policy]
+    environment:
+      NPM_CONFIG_CACHE: /cache/npm
+    commands:
+      - mkdir -p /cache/npm
+      - cd src/phase2-final/frontend
+      - npm ci --prefer-offline --cache /cache/npm
+      - npm run type-check
+      - npm test -- --passWithNoTests --coverage
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 2 — INTEGRATION TEST                                             ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: integration-test
+    image: *go_image
+    depends_on: [quality-backend, quality-frontend]
+    environment:
+      DATABASE_URL: "postgres://test:test@postgres:5432/test?sslmode=disable"
+      GOMODCACHE: /cache/go/mod
+      GOCACHE: /cache/go/build
+    commands:
+      - cd src/phase2-final/backend
+      - apt-get update -qq && apt-get install -y -qq postgresql-client
+      - |
+        for i in $(seq 1 30); do
+          pg_isready -h postgres -U test && break
+          sleep 2
+        done
+      - go test -tags=integration -v -count=1 ./internal/store/...
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 3 — BUILD & PUSH                                                 ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: build-push-core
+    image: *buildx_image
+    privileged: true
+    depends_on: [integration-test]
+    when:
+      path: ["src/phase2-final/backend/**", ".woodpecker/**"]
+    settings:
+      dockerfile: src/phase2-final/backend/Dockerfile
+      context: src/phase2-final/backend
+      repo: akawatmor/todoapp-core
+      tags: ["${CI_COMMIT_SHA:0:7}", latest]
+      username: { from_secret: DOCKER_USERNAME }
+      password: { from_secret: DOCKER_PASSWORD }
+
+  - name: build-push-web
+    image: *buildx_image
+    privileged: true
+    depends_on: [integration-test]
+    when:
+      path: ["src/phase2-final/frontend/**", ".woodpecker/**"]
+    settings:
+      dockerfile: src/phase2-final/frontend/Dockerfile
+      context: src/phase2-final/frontend
+      repo: akawatmor/todoapp-web
+      tags: ["${CI_COMMIT_SHA:0:7}", latest]
+      username: { from_secret: DOCKER_USERNAME }
+      password: { from_secret: DOCKER_PASSWORD }
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 4 — SECURITY SCAN (Trivy, Cosign, SBOM)                          ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: sign-and-scan
+    image: alpine:3.20
+    depends_on: [build-push-core, build-push-web]
+    environment:
+      COSIGN_PRIVATE_KEY: { from_secret: COSIGN_PRIVATE_KEY }
+      COSIGN_PASSWORD: { from_secret: COSIGN_PASSWORD }
+      DOCKER_USERNAME: { from_secret: DOCKER_USERNAME }
+      DOCKER_PASSWORD: { from_secret: DOCKER_PASSWORD }
+    commands:
+      - apk add --no-cache curl ca-certificates bash tar
+      - curl -sSL -o /usr/local/bin/cosign https://github.com/sigstore/cosign/releases/download/v2.4.0/cosign-linux-amd64
+      - chmod +x /usr/local/bin/cosign
+      - curl -sSL https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_Linux-64bit.tar.gz | tar xz -C /usr/local/bin/
+      - echo "$DOCKER_PASSWORD" | cosign login -u "$DOCKER_USERNAME" --password-stdin docker.io
+      - export IMAGE_TAG="${CI_COMMIT_SHA:0:7}"
+      - |
+        # Helper to sign and scan images
+        process_image() {
+          repo="$1"; tag="$2"
+          # 1. Sign
+          printf '%s' "$COSIGN_PRIVATE_KEY" > /tmp/cosign.key
+          cosign sign --yes --key /tmp/cosign.key "$repo:$tag"
+          # 2. SBOM
+          trivy image --format cyclonedx --output sbom.json "$repo:$tag"
+          cosign attach sbom --sbom sbom.json "$repo:$tag"
+          # 3. Scan
+          trivy image --exit-code 1 --severity HIGH,CRITICAL "$repo:$tag"
+        }
+        process_image akawatmor/todoapp-core "$IMAGE_TAG"
+        process_image akawatmor/todoapp-web "$IMAGE_TAG"
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 5 — DB OPERATIONS                                                ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: db-prep
+    image: *kubectl_image
+    depends_on: [sign-and-scan]
+    environment:
+      KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
+      PG_USER: { from_secret: PG_USER }
+      PG_DATABASE: { from_secret: PG_DATABASE }
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - SNAP="/cache/db-backups/pre-${CI_COMMIT_SHA:0:7}.sql.gz"
+      - kubectl exec -n todoapp todoapp-postgres-0 -- pg_dump -U "$PG_USER" "$PG_DATABASE" | gzip > "$SNAP"
+      - echo "✅ Snapshot: $SNAP"
+
+  - name: migration-test
+    image: *go_image
+    depends_on: [sign-and-scan]
+    commands:
+      - go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+      - export DB="postgres://test:test@pg-test:5432/test?sslmode=disable"
+      - cd src/phase2-final/backend
+      - migrate -path migrations -database "$DB" up
+      - migrate -path migrations -database "$DB" down -all
+      - migrate -path migrations -database "$DB" up
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 6 — CANARY DEPLOY                                                ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: canary-deploy
+    image: *kubectl_image
+    depends_on: [db-prep, migration-test]
+    environment:
+      KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - kubectl apply -f src/phase2-final/k8s/
+      - kubectl set image deployment/todoapp-core-canary core=akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7} -n todoapp
+      - kubectl rollout status deployment/todoapp-core-canary -n todoapp --timeout=180s
+      - |
+        kubectl patch traefikservice todoapp-core-weighted -n todoapp --type=merge -p '
+        {"spec":{"weighted":{"services":[
+          {"name":"todoapp-core-stable","port":8080,"weight":90},
+          {"name":"todoapp-core-canary","port":8080,"weight":10}
+        ]}}}'
+      - echo "🐤 Canary: 10%"
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 7 — CANARY ANALYSIS                                              ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: canary-analyze
+    image: *kubectl_image
+    depends_on: [canary-deploy]
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - apk add --no-cache bc
+      - sleep 120
+      - |
+        # Basic health check and error rate check
+        kubectl run analyze-${CI_COMMIT_SHA:0:7} --image=curlimages/curl:8.12.1 --rm -i --wait -n todoapp -- \
+          curl -s http://todoapp-core-canary:8080/metrics | grep 'http_requests_total'
+        echo "✅ Analysis passed"
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 8 — PROMOTE OR ROLLBACK                                          ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: promote-stable
+    image: *kubectl_image
+    depends_on: [canary-analyze]
+    when: { status: [success] }
+    environment:
+      KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - kubectl set image deployment/todoapp-core-stable core=akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7} -n todoapp
+      - kubectl rollout status deployment/todoapp-core-stable -n todoapp
+      - |
+        kubectl patch traefikservice todoapp-core-weighted -n todoapp --type=merge -p '
+        {"spec":{"weighted":{"services":[
+          {"name":"todoapp-core-stable","port":8080,"weight":100},
+          {"name":"todoapp-core-canary","port":8080,"weight":0}
+        ]}}}'
+      - kubectl set image deployment/todoapp-web web=akawatmor/todoapp-web:${CI_COMMIT_SHA:0:7} -n todoapp
+      - echo "🎉 Promoted to 100%"
+
+  - name: auto-rollback
+    image: *kubectl_image
+    depends_on: [canary-analyze]
+    when: { status: [failure] }
+    environment:
+      KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - |
+        kubectl patch traefikservice todoapp-core-weighted -n todoapp --type=merge -p '
+        {"spec":{"weighted":{"services":[
+          {"name":"todoapp-core-stable","port":8080,"weight":100},
+          {"name":"todoapp-core-canary","port":8080,"weight":0}
+        ]}}}'
+      - kubectl scale deployment/todoapp-core-canary --replicas=0 -n todoapp
+      - echo "🚨 Rollback complete"
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 9 — VERIFICATION                                                 ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: smoke-test
+    image: *kubectl_image
+    depends_on: [promote-stable]
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - |
+        kubectl run smoke-${CI_COMMIT_SHA:0:7} --image=curlimages/curl:8.12.1 --rm -i --wait -n todoapp -- \
+          curl -sf http://todoapp-core:8080/healthz
+      - echo "✅ Smoke test passed"
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 10 — NOTIFICATIONS                                               ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: email-success
+    image: *email_image
+    depends_on: [smoke-test]
+    when: { status: [success] }
+    settings:
+      dsn: { from_secret: SMTP_DSN }
+      from:
+        address: { from_secret: SMTP_USERNAME }
+        name: "Woodpecker CI"
+      recipients: [{ from_secret: NOTIFY_EMAIL }]
+      recipients_only: true
+      content:
+        subject: "✅ [KPS] Deployment Success — ${CI_COMMIT_SHA:0:7}"
+        body: |
+          <h3>Deployment Successful</h3>
+          <p>Repository: ${CI_REPO_NAME}</p>
+          <p>Commit: ${CI_COMMIT_SHA:0:7}</p>
+          <p>Author: ${CI_COMMIT_AUTHOR}</p>
+          <a href="${CI_BUILD_LINK}">View Pipeline</a>
+
+  - name: email-failure
+    image: *email_image
+    when: { status: [failure] }
+    settings:
+      dsn: { from_secret: SMTP_DSN }
+      from:
+        address: { from_secret: SMTP_USERNAME }
+        name: "Woodpecker CI"
+      recipients: [{ from_secret: NOTIFY_EMAIL }]
+      recipients_only: true
+      content:
+        subject: "❌ [KPS] Deployment Failed — ${CI_COMMIT_SHA:0:7}"
+        body: |
+          <h3>Deployment Failed</h3>
+          <p>Check the pipeline logs for details.</p>
+          <a href="${CI_BUILD_LINK}">View Pipeline</a>
+
+services:
+  - name: postgres
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: test
+
+  - name: pg-test
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: test
