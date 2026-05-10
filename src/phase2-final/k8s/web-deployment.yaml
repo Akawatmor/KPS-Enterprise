@@ -17,6 +17,7 @@ spec:
     metadata:
       labels:
         app: todoapp-web
+        app.kubernetes.io/part-of: todoapp
     spec:
       topologySpreadConstraints:
         - maxSkew: 1
