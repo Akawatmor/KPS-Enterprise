@@ -1,0 +1,117 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Woodpecker Pipeline — Pull Request Verification
+# ─────────────────────────────────────────────────────────────────────────────
+
+variables:
+  - &go_image "golang:1.25-bookworm"
+  - &node_image "node:22-bookworm-slim"
+  - &gitleaks_image "zricethezav/gitleaks:v8.18.4"
+  - &hadolint_image "hadolint/hadolint:v2.12.0-alpine"
+  - &kubescore_img "zegl/kube-score:v1.17.0"
+  - &conftest_image "openpolicyagent/conftest:v0.50.0"
+
+when:
+  event: pull_request
+  branch: [main, develop]
+
+steps:
+  # --- Stage 0: Pre-flight ---
+  - name: secret-scan
+    image: *gitleaks_image
+    depends_on: []
+    commands:
+      - gitleaks detect --source . --config .gitleaks.toml --verbose --redact --exit-code 1 --no-banner
+
+  - name: dockerfile-lint
+    image: *hadolint_image
+    depends_on: []
+    commands:
+      - hadolint --failure-threshold warning src/phase2-final/backend/Dockerfile
+      - hadolint --failure-threshold warning src/phase2-final/frontend/Dockerfile
+
+  - name: k8s-lint
+    image: *kubescore_img
+    depends_on: []
+    commands:
+      - |
+        kube-score score $(ls src/phase2-final/k8s/*.yaml | grep -v '\.sample\.yaml') \
+          --ignore-test pod-networkpolicy \
+          --ignore-test container-security-context-user-group-id \
+          --ignore-test container-image-tag \
+          --ignore-test deployment-has-host-podantiaffinity \
+          --output-format ci
+
+  - name: opa-policy
+    image: *conftest_image
+    depends_on: []
+    commands:
+      - |
+        if [ ! -d policies ] || [ -z "$(ls -A policies/*.rego 2>/dev/null)" ]; then
+          echo "⚠ No policies/ directory or .rego files found — skipping"
+          exit 0
+        fi
+      - conftest test src/phase2-final/k8s/ --policy policies/ --all-namespaces
+
+  # --- Stage 1: Quality Gates ---
+  - name: quality-backend
+    image: *go_image
+    depends_on: [secret-scan, dockerfile-lint, k8s-lint, opa-policy]
+    environment:
+      GOMODCACHE: /cache/go/mod
+      GOCACHE: /cache/go/build
+      GOBIN: /cache/go/bin
+      MIN_COVERAGE: "30"
+    commands:
+      - export PATH="/cache/go/bin:$PATH"
+      - mkdir -p /cache/go/mod /cache/go/build /cache/go/bin
+      - cd src/phase2-final/backend
+      - go mod download
+      - go test ./... -v -count=1 -race -coverprofile=coverage.out
+      - go tool cover -func=coverage.out
+      - |
+        COV=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
+        echo "Total coverage: ${COV}%"
+        awk -v c="$COV" -v m="$MIN_COVERAGE" 'BEGIN { exit !(c >= m) }' || {
+          echo "❌ Coverage ${COV}% below minimum ${MIN_COVERAGE}%"
+          exit 1
+        }
+
+  - name: quality-frontend
+    image: *node_image
+    depends_on: [secret-scan, dockerfile-lint, k8s-lint, opa-policy]
+    environment:
+      NPM_CONFIG_CACHE: /cache/npm
+    commands:
+      - mkdir -p /cache/npm
+      - cd src/phase2-final/frontend
+      - npm ci --prefer-offline --cache /cache/npm
+      - npm run type-check
+      - npm test -- --passWithNoTests --coverage
+
+  # --- Stage 2: Integration Test ---
+  - name: integration-test
+    image: *go_image
+    depends_on: [quality-backend, quality-frontend]
+    environment:
+      DATABASE_URL: "postgres://test:test@postgres:5432/test?sslmode=disable"
+      GOMODCACHE: /cache/go/mod
+      GOCACHE: /cache/go/build
+    commands:
+      - cd src/phase2-final/backend
+      - apt-get update -qq && apt-get install -y -qq postgresql-client
+      - |
+        for i in $(seq 1 30); do
+          pg_isready -h postgres -U test && break
+          echo "Waiting postgres... $i/30"
+          sleep 2
+        done
+      - echo "── Running integration tests ──"
+      - go test -tags=integration -v -count=1 ./internal/store/...
+
+services:
+  - name: postgres
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: test
