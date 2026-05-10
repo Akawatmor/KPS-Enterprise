@@ -151,7 +151,7 @@ steps:
 
   #     - go test -tags=integration ./internal/store/... -v
 
-- name: integration-test
+  - name: integration-test
     image: *go_image
     depends_on:
       - quality-gate
@@ -184,15 +184,15 @@ steps:
       # 5. รัน Integration Test
       - go test -tags=integration ./internal/store/... -v
 
-  - name: migration-test
-    image: migrate/migrate
-    depends_on:
-      - integration-test
-    commands:
-      # ใช้ absolute path จาก root workspace (/woodpecker/src/...) เพื่อป้องกันปัญหาหา Path ไม่เจอ
-      - /migrate -path /woodpecker/src/github.com/Akawatmor/KPS-Enterprise/src/phase2-final/backend/migrations -database "postgres://test:test@postgres:5432/test?sslmode=disable" up
-      - /migrate -path /woodpecker/src/github.com/Akawatmor/KPS-Enterprise/src/phase2-final/backend/migrations -database "postgres://test:test@postgres:5432/test?sslmode=disable" down -all
-      - /migrate -path /woodpecker/src/github.com/Akawatmor/KPS-Enterprise/src/phase2-final/backend/migrations -database "postgres://test:test@postgres:5432/test?sslmode=disable" up
+  # - name: migration-test
+  #   image: migrate/migrate
+  #   depends_on:
+  #     - integration-test
+  #   commands:
+  #     # ใช้ absolute path จาก root workspace (/woodpecker/src/...) เพื่อป้องกันปัญหาหา Path ไม่เจอ
+  #     - /migrate -path /woodpecker/src/github.com/Akawatmor/KPS-Enterprise/src/phase2-final/backend/migrations -database "postgres://test:test@postgres:5432/test?sslmode=disable" up
+  #     - /migrate -path /woodpecker/src/github.com/Akawatmor/KPS-Enterprise/src/phase2-final/backend/migrations -database "postgres://test:test@postgres:5432/test?sslmode=disable" down -all
+  #     - /migrate -path /woodpecker/src/github.com/Akawatmor/KPS-Enterprise/src/phase2-final/backend/migrations -database "postgres://test:test@postgres:5432/test?sslmode=disable" up
 
   - name: migration-test
     #image: *go_image
