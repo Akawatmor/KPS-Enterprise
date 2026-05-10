@@ -81,4 +81,6 @@ spec:
             - name: tmp
               mountPath: /tmp
           
-      # No volumes — data lives in PostgreSQL (todoapp-postgres StatefulSet)
+      volumes:
+        - name: tmp
+          emptyDir: {}
