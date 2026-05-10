@@ -176,7 +176,7 @@ steps:
       
       # 3. ตรวจสอบว่ามีโฟลเดอร์ migrations อยู่จริงก่อนรัน
       - cd src/phase2-final/backend
-      - ls -la migrations/ || echo "WARNING: migrations folder missing or empty!"
+      - 'ls -la migrations/ || echo "WARNING: migrations folder missing or empty!"'
       
       # 4. รัน Migration 
       - migrate -path migrations -database "$DATABASE_URL" up
