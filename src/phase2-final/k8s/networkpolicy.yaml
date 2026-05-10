@@ -4,6 +4,9 @@ kind: NetworkPolicy
 metadata:
   name: todoapp-default-deny-ingress
   namespace: todoapp
+  labels:
+    app: todoapp-web
+    app.kubernetes.io/part-of: todoapp
 spec:
   podSelector: {}
   policyTypes:
