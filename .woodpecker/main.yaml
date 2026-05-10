@@ -12,11 +12,19 @@ variables:
   - &trivy_image "aquasec/trivy:0.69.3"
   - &buildx_image "woodpeckerci/plugin-docker-buildx:4"
   - &gitleaks_image "zricethezav/gitleaks:v8.18.4"
-  - &hadolint_image "hadolint/hadolint:v2.12.0"
+  - &hadolint_image "hadolint/hadolint:v2.12.0-alpine"
   - &kubescore_img "zegl/kube-score:v1.17.0"
   - &conftest_image "openpolicyagent/conftest:v0.50.0"
   - &k6_image "grafana/k6:0.52.0"
   - &email_image "drillster/drone-email:1.2.4"
+
+# ════════════════════════════════════════════════════════════════════════════
+# ปิด Submodule เพราะเราไม่ใช้ ArgoCD แล้ว และการมี submodule ทำให้บางขั้นตอนที่ไม่ต้องใช้โค้ดใน src/phase2-final ต้องโหลดโค้ดทั้งหมดซึ่งช้าและเปลืองพื้นที่
+clone:
+  git:
+    image: woodpeckerci/plugin-git
+    settings:
+      recursive: false
 
 # ═════════════════════════════════════════════════════════════════════════════
 
