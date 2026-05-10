@@ -203,7 +203,7 @@ steps:
       - export KUBECONFIG=/tmp/kubeconfig
       - SNAP="/cache/db-backups/pre-${CI_COMMIT_SHA:0:7}.sql.gz"
       - kubectl exec -n todoapp todoapp-postgres-0 -- pg_dump -U "$PG_USER" "$PG_DATABASE" | gzip > "$SNAP"
-      - echo "✅ Snapshot: $SNAP"
+      - 'echo "✅ Snapshot: $SNAP"'
 
   - name: migration-test
     image: *go_image
