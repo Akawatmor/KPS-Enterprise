@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/jackc/pgx/v5 v5.9.1
-	golang.org/x/crypto v0.32.0
+	golang.org/x/crypto v0.35.0
 	modernc.org/sqlite v1.48.2
 )
 
