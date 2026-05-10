@@ -322,12 +322,13 @@ steps:
     image: *email_image
     depends_on: [smoke-test]
     when: { status: [success] }
+    secrets: [ SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, NOTIFY_EMAIL ]
     settings:
-      dsn: { from_secret: SMTP_DSN }
+      dsn: "smtp://$${SMTP_USERNAME}:$${SMTP_PASSWORD}@$${SMTP_HOST}:465?verify_peer=1"
       from:
         address: { from_secret: SMTP_USERNAME }
         name: "Woodpecker CI"
-      recipients: [{ from_secret: NOTIFY_EMAIL }]
+      recipients: { from_secret: NOTIFY_EMAIL }
       recipients_only: true
       content:
         subject: "✅ [KPS] Deployment Success — ${CI_COMMIT_SHA:0:7}"
@@ -342,12 +343,13 @@ steps:
     image: *email_image
     depends_on: [auto-rollback]
     when: { status: [failure] }
+    secrets: [ SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, NOTIFY_EMAIL ]
     settings:
-      dsn: { from_secret: SMTP_DSN }
+      dsn: "smtp://$${SMTP_USERNAME}:$${SMTP_PASSWORD}@$${SMTP_HOST}:465?verify_peer=1"
       from:
         address: { from_secret: SMTP_USERNAME }
         name: "Woodpecker CI"
-      recipients: [{ from_secret: NOTIFY_EMAIL }]
+      recipients: { from_secret: NOTIFY_EMAIL }
       recipients_only: true
       content:
         subject: "🚨 [KPS] AUTO-ROLLBACK executed — ${CI_COMMIT_SHA:0:7}"
@@ -360,12 +362,13 @@ steps:
   - name: email-failure
     image: *email_image
     when: { status: [failure] }
+    secrets: [ SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, NOTIFY_EMAIL ]
     settings:
-      dsn: { from_secret: SMTP_DSN }
+      dsn: "smtp://$${SMTP_USERNAME}:$${SMTP_PASSWORD}@$${SMTP_HOST}:465?verify_peer=1"
       from:
         address: { from_secret: SMTP_USERNAME }
         name: "Woodpecker CI"
-      recipients: [{ from_secret: NOTIFY_EMAIL }]
+      recipients: { from_secret: NOTIFY_EMAIL }
       recipients_only: true
       content:
         subject: "❌ [KPS] Pipeline Failed — ${CI_COMMIT_SHA:0:7}"
