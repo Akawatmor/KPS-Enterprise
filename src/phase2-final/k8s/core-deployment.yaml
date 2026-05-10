@@ -9,7 +9,7 @@ metadata:
     app: todoapp-core
     app.kubernetes.io/part-of: todoapp
 spec:
-  replicas: 2
+  #replicas: 1
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -22,6 +22,7 @@ spec:
     metadata:
       labels:
         app: todoapp-core
+        app.kubernetes.io/part-of: todoapp
     spec:
       # K3s: schedule core only on worker nodes (optional affinity)
       affinity:
@@ -73,10 +74,11 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
+            runAsUser: 65532
             capabilities: 
               drop: ["ALL"]
           volumeMounts: 
             - name: tmp
               mountPath: /tmp
-          runAsUser: 65532
+          
       # No volumes — data lives in PostgreSQL (todoapp-postgres StatefulSet)

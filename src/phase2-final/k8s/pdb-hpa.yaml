@@ -1,0 +1,58 @@
+# PDB — canary: allow full disruption (0 replicas at rest, single pod during canary)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: todoapp-core-canary-pdb
+  namespace: todoapp
+  labels:
+    app: todoapp-core
+    track: canary
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: todoapp-core
+      track: canary
+---
+# PDB — stable: always keep at least 1 pod available during node maintenance
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: todoapp-core-stable-pdb
+  namespace: todoapp
+  labels:
+    app: todoapp-core
+    track: stable
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: todoapp-core
+      track: stable
+---
+# HPA — autoscale stable deployment between 2–6 replicas based on CPU/memory
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: todoapp-core-stable-hpa
+  namespace: todoapp
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: todoapp-core-stable
+  minReplicas: 1
+  maxReplicas: 1
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80

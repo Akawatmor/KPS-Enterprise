@@ -9,7 +9,7 @@ metadata:
     app: todoapp-web
     app.kubernetes.io/part-of: todoapp
 spec:
-  replicas: 2
+  #replicas: 1
   selector:
     matchLabels:
       app: todoapp-web
@@ -17,6 +17,7 @@ spec:
     metadata:
       labels:
         app: todoapp-web
+        app.kubernetes.io/part-of: todoapp
     spec:
       topologySpreadConstraints:
         - maxSkew: 1
