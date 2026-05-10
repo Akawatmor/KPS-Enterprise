@@ -16,6 +16,11 @@ variables:
   - &oasdiff_image "tufin/oasdiff:latest"
   - &email_image "drillster/drone-email"
 
+clone:
+  git:
+    image: woodpeckerci/plugin-git
+    settings:
+      recursive: false
 
 services:
   - name: postgres
@@ -146,35 +151,48 @@ steps:
 
   #     - go test -tags=integration ./internal/store/... -v
 
-  - name: integration-test
+- name: integration-test
     image: *go_image
     depends_on:
       - quality-gate
     environment:
       DATABASE_URL: postgres://test:test@postgres:5432/test?sslmode=disable
     commands:
-      # 1. รอ Database โดยไม่ใช้ pg_isready (ใช้ /dev/tcp ของ Bash)
+      # 1. ติดตั้ง netcat-openbsd แบบด่วนเพื่อใช้เช็ค DB ชัวร์ๆ (เร็วกว่าโหลด postgresql-client มาก)
+      - apt-get update -qq && apt-get install -y -qq netcat-openbsd
       - |
         echo "Waiting for postgres..."
         for i in $(seq 1 30); do
-          if (echo > /dev/tcp/postgres/5432) >/dev/null 2>&1; then
+          if nc -z postgres 5432; then
             echo "Postgres is up!"
             break
           fi
           sleep 2
         done
 
-      # 2. ติดตั้ง migrate แบบเร็ว (โหลด binary ตรงๆ) หรือใช้ go install -tags
+      # 2. ใช้ go install -tags เพื่อดึง postgres driver
       - go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
       - export PATH=$PATH:$(go env GOPATH)/bin
       
+      # 3. ตรวจสอบว่ามีโฟลเดอร์ migrations อยู่จริงก่อนรัน
       - cd src/phase2-final/backend
+      - ls -la migrations/ || echo "WARNING: migrations folder missing or empty!"
       
-      # 3. รัน Migration ก่อนเพื่อให้ Database มี Schema พร้อมสำหรับ Test
+      # 4. รัน Migration 
       - migrate -path migrations -database "$DATABASE_URL" up
 
-      # 4. รัน Integration Test
+      # 5. รัน Integration Test
       - go test -tags=integration ./internal/store/... -v
+
+  - name: migration-test
+    image: migrate/migrate
+    depends_on:
+      - integration-test
+    commands:
+      # ใช้ absolute path จาก root workspace (/woodpecker/src/...) เพื่อป้องกันปัญหาหา Path ไม่เจอ
+      - /migrate -path /woodpecker/src/github.com/Akawatmor/KPS-Enterprise/src/phase2-final/backend/migrations -database "postgres://test:test@postgres:5432/test?sslmode=disable" up
+      - /migrate -path /woodpecker/src/github.com/Akawatmor/KPS-Enterprise/src/phase2-final/backend/migrations -database "postgres://test:test@postgres:5432/test?sslmode=disable" down -all
+      - /migrate -path /woodpecker/src/github.com/Akawatmor/KPS-Enterprise/src/phase2-final/backend/migrations -database "postgres://test:test@postgres:5432/test?sslmode=disable" up
 
   - name: migration-test
     #image: *go_image
