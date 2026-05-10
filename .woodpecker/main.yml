@@ -16,7 +16,7 @@ variables:
   - &kubescore_img "zegl/kube-score:v1.17.0"
   - &conftest_image "openpolicyagent/conftest:v0.50.0"
   - &k6_image "grafana/k6:0.52.0"
-  - &email_image "drillster/drone-email:1.2.4"
+  - &email_image "deblan/woodpecker-email:latest"
 
 clone:
   git:
@@ -149,7 +149,7 @@ steps:
 
   - name: integration-test
     image: *go_image
-    depends_on: [quality-backend]
+    depends_on: [quality-backend, quality-frontend]
     when:
       event: [push, pull_request]
       branch: [main, develop]
@@ -454,7 +454,7 @@ services:
 
   - name: canary-deploy
     image: *kubectl_image
-    depends_on: [db-snapshot, migration-test, sign-images]
+    depends_on: [db-snapshot, migration-test, trivy-scan]
     when:
       event: push
       branch: main
@@ -702,8 +702,7 @@ services:
 
   - name: email-success
     image: *email_image
-    depends_on: [smoke-test-prod, load-test]
-    failure: ignore
+    depends_on: [load-test]
     when:
       - event: push
         branch: main
@@ -762,11 +761,10 @@ services:
   - name: email-rollback
     image: *email_image
     depends_on: [auto-rollback]
-    failure: ignore
     when:
       - event: push
         branch: main
-        status: [success]
+        status: [failure]
     settings:
       host: { from_secret: SMTP_HOST }
       port: 587
@@ -793,7 +791,6 @@ services:
 
   - name: email-prefail
     image: *email_image
-    failure: ignore
     when:
       - event: push
         branch: main
