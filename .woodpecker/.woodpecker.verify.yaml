@@ -153,14 +153,17 @@ steps:
       - integration-test
 
     commands:
-      - go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+      # - go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 
-      - export PATH=$PATH:$(go env GOPATH)/bin
+      # - export PATH=$PATH:$(go env GOPATH)/bin
 
-      - export DB="postgres://test:test@postgres:5432/test?sslmode=disable"
+      # - export DB="postgres://test:test@postgres:5432/test?sslmode=disable"
 
-      - cd src/phase2-final/backend
+      # - cd src/phase2-final/backend
 
-      - migrate -path migrations -database "$DB" up
-      - migrate -path migrations -database "$DB" down -all
-      - migrate -path migrations -database "$DB" up
+      # - migrate -path migrations -database "$DB" up
+      # - migrate -path migrations -database "$DB" down -all
+      # - migrate -path migrations -database "$DB" up
+      - /migrate -path src/phase2-final/backend/migrations -database "postgres://test:test@postgres:5432/test?sslmode=disable" up
+      - /migrate -path src/phase2-final/backend/migrations -database "postgres://test:test@postgres:5432/test?sslmode=disable" down -all
+      - /migrate -path src/phase2-final/backend/migrations -database "postgres://test:test@postgres:5432/test?sslmode=disable" up
