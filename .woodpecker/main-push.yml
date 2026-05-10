@@ -237,7 +237,7 @@ steps:
           {"name":"todoapp-core-stable","port":8080,"weight":90},
           {"name":"todoapp-core-canary","port":8080,"weight":10}
         ]}}}'
-      - echo "🐤 Canary: 10%"
+      - 'echo "🐤 Canary: 10%"'
 
   # ╔═════════════════════════════════════════════════════════════════════════╗
   # ║  STAGE 7 — CANARY ANALYSIS                                              ║
