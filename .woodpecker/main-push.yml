@@ -322,61 +322,54 @@ steps:
     image: *email_image
     depends_on: [smoke-test]
     when: { status: [success] }
-    secrets: [ SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, NOTIFY_EMAIL ]
-    settings:
-      dsn: "smtp://$${SMTP_USERNAME}:$${SMTP_PASSWORD}@$${SMTP_HOST}:465?verify_peer=1"
-      from:
-        address: { from_secret: SMTP_USERNAME }
-        name: "Woodpecker CI"
-      recipients: { from_secret: NOTIFY_EMAIL }
-      recipients_only: true
-      content:
-        subject: "✅ [KPS] Deployment Success — ${CI_COMMIT_SHA:0:7}"
-        body: |
-          <h3>Deployment Successful</h3>
-          <p>Repository: ${CI_REPO_NAME}</p>
-          <p>Commit: ${CI_COMMIT_SHA:0:7}</p>
-          <p>Author: ${CI_COMMIT_AUTHOR}</p>
-          <a href="${CI_BUILD_LINK}">View Pipeline</a>
+    environment:
+      SMTP_HOST: { from_secret: SMTP_HOST }
+      SMTP_USERNAME: { from_secret: SMTP_USERNAME }
+      SMTP_PASSWORD: { from_secret: SMTP_PASSWORD }
+      NOTIFY_EMAIL: { from_secret: NOTIFY_EMAIL }
+    commands:
+      - |
+        export PLUGIN_DSN="smtp://$SMTP_USERNAME:$SMTP_PASSWORD@$SMTP_HOST:465?verify_peer=1"
+        export PLUGIN_FROM="{\"address\":\"$SMTP_USERNAME\",\"name\":\"Woodpecker CI\"}"
+        export PLUGIN_RECIPIENTS="$NOTIFY_EMAIL"
+        export PLUGIN_RECIPIENTS_ONLY="true"
+        export PLUGIN_CONTENT="{\"subject\":\"✅ [KPS] Deployment Success — ${CI_COMMIT_SHA:0:7}\",\"body\":\"<h3>Deployment Successful</h3><p>Repository: ${CI_REPO_NAME}</p><p>Commit: ${CI_COMMIT_SHA:0:7}</p><p>Author: ${CI_COMMIT_AUTHOR}</p><a href='${CI_BUILD_LINK}'>View Pipeline</a>\"}"
+        php /opt/app/bin/console
 
   - name: email-rollback
     image: *email_image
     depends_on: [auto-rollback]
     when: { status: [failure] }
-    secrets: [ SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, NOTIFY_EMAIL ]
-    settings:
-      dsn: "smtp://$${SMTP_USERNAME}:$${SMTP_PASSWORD}@$${SMTP_HOST}:465?verify_peer=1"
-      from:
-        address: { from_secret: SMTP_USERNAME }
-        name: "Woodpecker CI"
-      recipients: { from_secret: NOTIFY_EMAIL }
-      recipients_only: true
-      content:
-        subject: "🚨 [KPS] AUTO-ROLLBACK executed — ${CI_COMMIT_SHA:0:7}"
-        body: |
-          <h3>Auto-Rollback Executed</h3>
-          <p>Canary failed analysis. Production restored.</p>
-          <p>Commit: ${CI_COMMIT_SHA:0:7}</p>
-          <a href="${CI_BUILD_LINK}">View Pipeline</a>
+    environment:
+      SMTP_HOST: { from_secret: SMTP_HOST }
+      SMTP_USERNAME: { from_secret: SMTP_USERNAME }
+      SMTP_PASSWORD: { from_secret: SMTP_PASSWORD }
+      NOTIFY_EMAIL: { from_secret: NOTIFY_EMAIL }
+    commands:
+      - |
+        export PLUGIN_DSN="smtp://$SMTP_USERNAME:$SMTP_PASSWORD@$SMTP_HOST:465?verify_peer=1"
+        export PLUGIN_FROM="{\"address\":\"$SMTP_USERNAME\",\"name\":\"Woodpecker CI\"}"
+        export PLUGIN_RECIPIENTS="$NOTIFY_EMAIL"
+        export PLUGIN_RECIPIENTS_ONLY="true"
+        export PLUGIN_CONTENT="{\"subject\":\"🚨 [KPS] AUTO-ROLLBACK executed — ${CI_COMMIT_SHA:0:7}\",\"body\":\"<h3>Auto-Rollback Executed</h3><p>Canary failed analysis. Production restored.</p><p>Commit: ${CI_COMMIT_SHA:0:7}</p><a href='${CI_BUILD_LINK}'>View Pipeline</a>\"}"
+        php /opt/app/bin/console
 
   - name: email-failure
     image: *email_image
     when: { status: [failure] }
-    secrets: [ SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, NOTIFY_EMAIL ]
-    settings:
-      dsn: "smtp://$${SMTP_USERNAME}:$${SMTP_PASSWORD}@$${SMTP_HOST}:465?verify_peer=1"
-      from:
-        address: { from_secret: SMTP_USERNAME }
-        name: "Woodpecker CI"
-      recipients: { from_secret: NOTIFY_EMAIL }
-      recipients_only: true
-      content:
-        subject: "❌ [KPS] Pipeline Failed — ${CI_COMMIT_SHA:0:7}"
-        body: |
-          <h3>Pipeline Failed</h3>
-          <p>Check the pipeline logs for details.</p>
-          <p>Commit: ${CI_COMMIT_SHA:0:7}</p>
-          <a href="${CI_BUILD_LINK}">View Pipeline</a>
+    environment:
+      SMTP_HOST: { from_secret: SMTP_HOST }
+      SMTP_USERNAME: { from_secret: SMTP_USERNAME }
+      SMTP_PASSWORD: { from_secret: SMTP_PASSWORD }
+      NOTIFY_EMAIL: { from_secret: NOTIFY_EMAIL }
+    commands:
+      - |
+        export PLUGIN_DSN="smtp://$SMTP_USERNAME:$SMTP_PASSWORD@$SMTP_HOST:465?verify_peer=1"
+        export PLUGIN_FROM="{\"address\":\"$SMTP_USERNAME\",\"name\":\"Woodpecker CI\"}"
+        export PLUGIN_RECIPIENTS="$NOTIFY_EMAIL"
+        export PLUGIN_RECIPIENTS_ONLY="true"
+        export PLUGIN_CONTENT="{\"subject\":\"❌ [KPS] Pipeline Failed — ${CI_COMMIT_SHA:0:7}\",\"body\":\"<h3>Pipeline Failed</h3><p>Check the pipeline logs for details.</p><p>Commit: ${CI_COMMIT_SHA:0:7}</p><a href='${CI_BUILD_LINK}'>View Pipeline</a>\"}"
+        php /opt/app/bin/console
 
 services:
   - name: postgres
