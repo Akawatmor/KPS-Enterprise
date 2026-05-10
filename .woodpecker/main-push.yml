@@ -128,8 +128,6 @@ steps:
     image: *buildx_image
     privileged: true
     depends_on: [integration-test]
-    when:
-      path: ["src/phase2-final/backend/**", ".woodpecker/**"]
     settings:
       dockerfile: src/phase2-final/backend/Dockerfile
       context: src/phase2-final/backend
@@ -142,8 +140,6 @@ steps:
     image: *buildx_image
     privileged: true
     depends_on: [integration-test]
-    when:
-      path: ["src/phase2-final/frontend/**", ".woodpecker/**"]
     settings:
       dockerfile: src/phase2-final/frontend/Dockerfile
       context: src/phase2-final/frontend
