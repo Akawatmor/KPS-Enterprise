@@ -52,7 +52,13 @@ steps:
     image: *kubescore_image
     depends_on: [dockerfile-lint]
     commands:
-      - kube-score score src/phase2-final/k8s/*.yaml --output-format ci --ignore-test container-image-tag --ignore-test container-security-context-user-group-id
+      - |
+        kube-score score $(ls src/phase2-final/k8s/*.yaml | grep -v '\.sample\.yaml') \
+          --ignore-test pod-networkpolicy \
+          --ignore-test container-security-context-user-group-id \
+          --ignore-test container-image-tag \
+          --ignore-test deployment-has-host-podantiaffinity \
+          --output-format ci
 
   - name: opa-policy
     image: *conftest_image

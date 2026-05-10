@@ -58,6 +58,9 @@ steps:
       repo: akawatmor/todoapp-web
       dockerfile: src/phase2-final/frontend/Dockerfile
       context: src/phase2-final/frontend
+      
+      build_args:
+        - NEXT_PUBLIC_API_BASE_URL=
 
       tags:
         - "${CI_COMMIT_SHA:0:7}"
