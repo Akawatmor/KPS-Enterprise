@@ -9,7 +9,7 @@ metadata:
     app: todoapp-core
     app.kubernetes.io/part-of: todoapp
 spec:
-  replicas: 1
+  #replicas: 1
   strategy:
     type: RollingUpdate
     rollingUpdate:

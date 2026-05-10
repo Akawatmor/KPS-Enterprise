@@ -5,6 +5,7 @@ metadata:
   namespace: todoapp
   labels:
     app: todoapp-postgres
+    app.kubernetes.io/part-of: todoapp
     component: database
     tier: data
 spec:
