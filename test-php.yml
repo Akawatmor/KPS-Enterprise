@@ -1,0 +1,12 @@
+steps:
+  test:
+    image: deblan/woodpecker-email:latest
+    environment:
+      PLUGIN_DSN: "smtp://user:pass@host:465"
+      PLUGIN_FROM: '{"address":"user@host.com","name":"Woodpecker CI"}'
+      PLUGIN_RECIPIENTS: "test@test.com"
+      PLUGIN_RECIPIENTS_ONLY: "true"
+      PLUGIN_CONTENT: '{"subject":"test","body":"test body"}'
+    commands:
+      - env | grep PLUGIN
+      - php /opt/app/bin/console || true

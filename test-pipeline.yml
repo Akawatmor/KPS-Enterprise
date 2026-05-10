@@ -1,0 +1,13 @@
+steps:
+  dump:
+    image: dumper
+    settings:
+      content:
+        subject: hello
+        body: world
+      from:
+        address: woodpecker@example.com
+  show:
+    image: alpine
+    commands:
+      - cat env.txt

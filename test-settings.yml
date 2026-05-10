@@ -1,0 +1,9 @@
+steps:
+  test:
+    image: alpine
+    settings:
+      content:
+        subject: hello
+        body: world
+    commands:
+      - env | grep PLUGIN

@@ -1,0 +1,9 @@
+variables:
+  - &email_image "deblan/woodpecker-email:latest"
+steps:
+  test:
+    image: *email_image
+    environment:
+      MY_USER: "hello"
+    settings:
+      dsn: "smtp://$${MY_USER}@host"

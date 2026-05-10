@@ -1,0 +1,6 @@
+steps:
+  test:
+    image: alpine
+    secrets: [ SMTP_HOST ]
+    commands:
+      - echo ${SMTP_HOST}
