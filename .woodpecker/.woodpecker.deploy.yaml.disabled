@@ -1,0 +1,254 @@
+when:
+  - branch: [main]
+    event: [push]
+
+variables:
+  - &go_image "golang:1.25-bookworm"
+  - &node_image "node:22-bookworm-slim"
+  - &kubectl_image "alpine/k8s:1.31.0"
+  - &trivy_image "aquasec/trivy:0.69.3"
+  - &buildx_image "woodpeckerci/plugin-docker-buildx:4"
+  - &cosign_image "ghcr.io/sigstore/cosign/cosign:v2.4.0"
+  - &gitleaks_image "zricethezav/gitleaks:latest"
+  - &hadolint_image "hadolint/hadolint:latest-debian"
+  - &kubescore_image "zegl/kube-score:latest"
+  - &conftest_image "openpolicyagent/conftest:latest"
+  - &k6_image "grafana/k6:latest"
+  - &oasdiff_image "tufin/oasdiff:latest"
+  - &email_image "drillster/drone-email"
+
+steps:
+
+# =============================================================================
+# PREPARE
+# =============================================================================
+
+  - name: db-snapshot
+    image: *kubectl_image
+
+    environment:
+      KUBECONFIG_B64:
+        from_secret: KUBECONFIG_B64
+      PG_USER:
+        from_secret: PG_USER
+      PG_DATABASE:
+        from_secret: PG_DATABASE
+
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - trap 'rm -f /tmp/kubeconfig' EXIT
+
+      - mkdir -p /cache/db-backups
+      - SNAP="/cache/db-backups/pre-${CI_COMMIT_SHA:0:7}-$(date +%s).sql.gz"
+
+      - |
+        kubectl exec -n todoapp todoapp-postgres-0 -- \
+          pg_dump -U "$PG_USER" "$PG_DATABASE" | gzip > "$SNAP" || echo "⚠ DB snapshot failed or skipped"
+
+      - ls -lh "$SNAP" || true
+      - echo "DB snapshot completed"
+
+# =============================================================================
+# CANARY
+# =============================================================================
+
+  - name: canary-deploy
+    image: *kubectl_image
+
+    depends_on:
+      - db-snapshot
+
+    environment:
+      KUBECONFIG_B64:
+        from_secret: KUBECONFIG_B64
+
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - trap 'rm -f /tmp/kubeconfig' EXIT
+
+      # Apply baseline infrastructure (idempotent)
+      - kubectl apply -f src/phase2-final/k8s/namespace.yaml
+      - kubectl apply -f src/phase2-final/k8s/configmap.yaml
+      - kubectl apply -f src/phase2-final/k8s/core-pvc.yaml
+      - kubectl apply -f src/phase2-final/k8s/web-service.yaml
+      - kubectl apply -f src/phase2-final/k8s/ingress.yaml
+
+      # Apply Canary-specific manifests
+      - kubectl apply -f src/phase2-final/k8s/core-services.yaml
+      - kubectl apply -f src/phase2-final/k8s/traefik-weighted.yaml
+
+      - |
+        kubectl set image deployment/todoapp-core-canary \
+          core=akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7} \
+          -n todoapp
+
+      - kubectl scale deployment/todoapp-core-canary --replicas=1 -n todoapp
+
+      - |
+        kubectl rollout status \
+          deployment/todoapp-core-canary \
+          -n todoapp \
+          --timeout=180s
+
+      # Shift traffic (10% to canary)
+      - |
+        kubectl patch traefikservice todoapp-core-weighted -n todoapp --type=merge -p '
+        {"spec":{"weighted":{"services":[
+          {"name":"todoapp-core-stable","port":8080,"weight":90},
+          {"name":"todoapp-core-canary","port":8080,"weight":10}
+        ]}}}'
+
+# =============================================================================
+# VERIFY
+# =============================================================================
+
+  - name: canary-verify
+    image: *kubectl_image
+
+    depends_on:
+      - canary-deploy
+
+    environment:
+      KUBECONFIG_B64:
+        from_secret: KUBECONFIG_B64
+
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - trap 'rm -f /tmp/kubeconfig' EXIT
+
+      - apk add --no-cache curl
+
+      - echo "⏳ Baking canary for 30s..."
+      - sleep 30
+
+      - curl -f http://todoapp-core-canary:8080/healthz
+
+# =============================================================================
+# PROMOTE
+# =============================================================================
+
+  - name: promote
+    image: *kubectl_image
+
+    depends_on:
+      - canary-verify
+
+    environment:
+      KUBECONFIG_B64:
+        from_secret: KUBECONFIG_B64
+
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - trap 'rm -f /tmp/kubeconfig' EXIT
+
+      # 1. Update Core Stable
+      - |
+        kubectl set image deployment/todoapp-core-stable \
+          core=akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7} \
+          -n todoapp
+
+      - |
+        kubectl rollout status deployment/todoapp-core-stable \
+          -n todoapp \
+          --timeout=300s
+
+      # 2. Promote traffic to 100% stable
+      - |
+        kubectl patch traefikservice todoapp-core-weighted -n todoapp --type=merge -p '
+        {"spec":{"weighted":{"services":[
+          {"name":"todoapp-core-stable","port":8080,"weight":100},
+          {"name":"todoapp-core-canary","port":8080,"weight":0}
+        ]}}}'
+
+      - kubectl scale deployment/todoapp-core-canary --replicas=0 -n todoapp
+
+      # 3. Deploy Frontend (Missing step)
+      - kubectl apply -f src/phase2-final/k8s/web-deployment.yaml
+      - |
+        kubectl set image deployment/todoapp-web \
+          web=akawatmor/todoapp-web:${CI_COMMIT_SHA:0:7} \
+          -n todoapp
+
+      - kubectl rollout status deployment/todoapp-web -n todoapp --timeout=180s
+
+# =============================================================================
+# VERIFY PROD
+# =============================================================================
+
+  - name: smoke-test
+    image: *kubectl_image
+
+    depends_on:
+      - promote
+
+    environment:
+      KUBECONFIG_B64:
+        from_secret: KUBECONFIG_B64
+
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - trap 'rm -f /tmp/kubeconfig' EXIT
+
+      - echo "🏁 Running production smoke tests..."
+      - sleep 10
+
+      - |
+        kubectl run smoke-prod-${CI_COMMIT_SHA:0:7} \
+          --image=curlimages/curl:8.12.1 --restart=Never --rm -i --wait \
+          --timeout=90s -n todoapp -- sh -c '
+            set -e
+            echo "Checking healthz..."
+            curl -sf --retry 3 http://todoapp-core:8080/healthz
+            echo "\nChecking readyz..."
+            curl -sf --retry 3 http://todoapp-core:8080/readyz
+            echo "\nChecking API connectivity..."
+            curl -sf -H "X-User-ID: smoke" http://todoapp-core:8080/api/v1/tasks
+          '
+
+# =============================================================================
+# ROLLBACK
+# =============================================================================
+
+  - name: rollback
+    image: *kubectl_image
+
+    failure: ignore
+
+    depends_on:
+      - canary-deploy
+      - canary-verify
+      - promote
+      - smoke-test
+
+    when:
+      status: [failure]
+
+    environment:
+      KUBECONFIG_B64:
+        from_secret: KUBECONFIG_B64
+
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - trap 'rm -f /tmp/kubeconfig' EXIT
+
+      - echo "🚨 ROLLBACK INITIATED"
+
+      # Restore traffic to stable release
+      - |
+        kubectl patch traefikservice todoapp-core-weighted -n todoapp --type=merge -p '
+        {"spec":{"weighted":{"services":[
+          {"name":"todoapp-core-stable","port":8080,"weight":100},
+          {"name":"todoapp-core-canary","port":8080,"weight":0}
+        ]}}}'
+
+      - kubectl rollout undo deployment/todoapp-core-stable -n todoapp || true
+
+      - kubectl scale deployment/todoapp-core-canary \
+          --replicas=0 \
+          -n todoapp || true
