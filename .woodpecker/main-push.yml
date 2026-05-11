@@ -14,7 +14,7 @@ variables:
   - &kubescore_img "zegl/kube-score:v1.17.0"
   - &conftest_image "openpolicyagent/conftest:v0.50.0"
   - &k6_image "grafana/k6:0.52.0"
-  - &email_image "drillster/drone-email:1.2.4"
+  - &email_image "deblan/woodpecker-email:latest"
 
 when:
   event: push
@@ -396,7 +396,14 @@ steps:
         kubectl port-forward svc/todoapp-core-canary 8080:8080 -n todoapp >/tmp/canary-port-forward.log 2>&1 &
         PF_PID=$!
 
-        PROM_SERVICE=$(kubectl -n monitoring get svc -l app.kubernetes.io/name=prometheus -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+        PROM_SERVICE=$(
+          kubectl -n monitoring get svc -o json | jq -r '
+            .items[]
+            | select(.spec.clusterIP != "None")
+            | select(any(.spec.ports[]?; .port == 9090))
+            | .metadata.name
+          ' | head -n1
+        )
         [ -n "$PROM_SERVICE" ] || {
           echo "❌ Prometheus service not found"
           kubectl -n monitoring get svc
@@ -645,18 +652,21 @@ steps:
       - event: push
         branch: main
         status: [success]
-    settings:
-      host: { from_secret: SMTP_HOST }
-      port: 587
-      username: { from_secret: SMTP_USERNAME }
-      password: { from_secret: SMTP_PASSWORD }
-      from: { from_secret: SMTP_USERNAME }
-      recipients: { from_secret: NOTIFY_EMAIL }
-      recipients_only: true
-      content_type: text/html
-      subject: >-
-        ✅ [KPS] Deployment Success — ${CI_REPO_NAME}@${CI_COMMIT_SHA:0:7}
-      body: |
+    environment:
+      SMTP_HOST: { from_secret: SMTP_HOST }
+      SMTP_USERNAME: { from_secret: SMTP_USERNAME }
+      SMTP_PASSWORD: { from_secret: SMTP_PASSWORD }
+      NOTIFY_EMAIL: { from_secret: NOTIFY_EMAIL }
+    commands:
+      - |
+        export PLUGIN_DSN="smtp://$SMTP_USERNAME:$SMTP_PASSWORD@$SMTP_HOST:465?verify_peer=1"
+        export PLUGIN_FROM="$(php -r 'echo json_encode(["address" => getenv("SMTP_USERNAME"), "name" => "Woodpecker CI"], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);')"
+        export PLUGIN_RECIPIENTS="$NOTIFY_EMAIL"
+        export PLUGIN_RECIPIENTS_ONLY="true"
+        export PLUGIN_CONTENT="$(php <<'PHP'
+        <?php
+        $subject = sprintf('✅ [KPS] Deployment Success — %s@%s', getenv('CI_REPO_NAME'), substr(getenv('CI_COMMIT_SHA'), 0, 7));
+        $body = <<<HTML
         <html>
         <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:700px;margin:0 auto;padding:24px;color:#111827">
           <div style="background:#ecfdf5;border-left:4px solid #10b981;padding:20px;border-radius:8px;margin-bottom:24px">
@@ -664,21 +674,37 @@ steps:
             <p style="margin:8px 0 0;color:#065f46">Production checks passed and release-tag stage completed.</p>
           </div>
           <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:20px">
-            <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600;width:160px">Repository</td><td style="padding:10px;border:1px solid #e5e7eb">${CI_REPO_NAME}</td></tr>
-            <tr><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Branch</td><td style="padding:10px;border:1px solid #e5e7eb">${CI_COMMIT_BRANCH}</td></tr>
-            <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Commit</td><td style="padding:10px;border:1px solid #e5e7eb"><code>${CI_COMMIT_SHA:0:7}</code></td></tr>
-            <tr><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Author</td><td style="padding:10px;border:1px solid #e5e7eb">${CI_COMMIT_AUTHOR}</td></tr>
-            <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Message</td><td style="padding:10px;border:1px solid #e5e7eb">${CI_COMMIT_MESSAGE}</td></tr>
+            <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600;width:160px">Repository</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
+            <tr><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Branch</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
+            <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Commit</td><td style="padding:10px;border:1px solid #e5e7eb"><code>%s</code></td></tr>
+            <tr><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Author</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
+            <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Message</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
             <tr><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">App URL</td><td style="padding:10px;border:1px solid #e5e7eb"><a href="https://todoapp-kps.akawatmor.com">https://todoapp-kps.akawatmor.com</a></td></tr>
           </table>
           <div style="background:#f9fafb;padding:14px 16px;border-radius:8px;margin-bottom:20px;font-size:13px;line-height:1.7">
             preflight ✅ → quality ✅ → integration ✅ → build ✅ → security ✅ → deploy ✅ → smoke ✅ → release-tag ✅
           </div>
           <div style="text-align:center">
-            <a href="${CI_BUILD_LINK}" style="display:inline-block;padding:11px 22px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600">Open Pipeline</a>
+            <a href="%s" style="display:inline-block;padding:11px 22px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600">Open Pipeline</a>
           </div>
         </body>
         </html>
+        HTML;
+        echo json_encode([
+            'subject' => $subject,
+            'body' => sprintf(
+                $body,
+                getenv('CI_REPO_NAME'),
+                getenv('CI_COMMIT_BRANCH'),
+                substr(getenv('CI_COMMIT_SHA'), 0, 7),
+                getenv('CI_COMMIT_AUTHOR'),
+                getenv('CI_COMMIT_MESSAGE'),
+                getenv('CI_BUILD_LINK')
+            ),
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        PHP
+        )"
+        php /opt/app/bin/console
 
   - name: email-rollback
     image: *email_image
@@ -688,18 +714,21 @@ steps:
       - event: push
         branch: main
         status: [failure]
-    settings:
-      host: { from_secret: SMTP_HOST }
-      port: 587
-      username: { from_secret: SMTP_USERNAME }
-      password: { from_secret: SMTP_PASSWORD }
-      from: { from_secret: SMTP_USERNAME }
-      recipients: { from_secret: NOTIFY_EMAIL }
-      recipients_only: true
-      content_type: text/html
-      subject: >-
-        🚨 [KPS] AUTO-ROLLBACK — ${CI_REPO_NAME}@${CI_COMMIT_SHA:0:7}
-      body: |
+    environment:
+      SMTP_HOST: { from_secret: SMTP_HOST }
+      SMTP_USERNAME: { from_secret: SMTP_USERNAME }
+      SMTP_PASSWORD: { from_secret: SMTP_PASSWORD }
+      NOTIFY_EMAIL: { from_secret: NOTIFY_EMAIL }
+    commands:
+      - |
+        export PLUGIN_DSN="smtp://$SMTP_USERNAME:$SMTP_PASSWORD@$SMTP_HOST:465?verify_peer=1"
+        export PLUGIN_FROM="$(php -r 'echo json_encode(["address" => getenv("SMTP_USERNAME"), "name" => "Woodpecker CI"], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);')"
+        export PLUGIN_RECIPIENTS="$NOTIFY_EMAIL"
+        export PLUGIN_RECIPIENTS_ONLY="true"
+        export PLUGIN_CONTENT="$(php <<'PHP'
+        <?php
+        $subject = sprintf('🚨 [KPS] AUTO-ROLLBACK — %s@%s', getenv('CI_REPO_NAME'), substr(getenv('CI_COMMIT_SHA'), 0, 7));
+        $body = <<<HTML
         <html>
         <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:700px;margin:0 auto;padding:24px;color:#111827">
           <div style="background:#fef2f2;border-left:4px solid #ef4444;padding:20px;border-radius:8px;margin-bottom:24px">
@@ -707,17 +736,32 @@ steps:
             <p style="margin:8px 0 0;color:#991b1b">Canary analysis failed and production traffic was restored to the previous stable release.</p>
           </div>
           <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:20px">
-            <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600;width:160px">Repository</td><td style="padding:10px;border:1px solid #e5e7eb">${CI_REPO_NAME}</td></tr>
-            <tr><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Branch</td><td style="padding:10px;border:1px solid #e5e7eb">${CI_COMMIT_BRANCH}</td></tr>
-            <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Commit</td><td style="padding:10px;border:1px solid #e5e7eb"><code>${CI_COMMIT_SHA:0:7}</code></td></tr>
-            <tr><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Author</td><td style="padding:10px;border:1px solid #e5e7eb">${CI_COMMIT_AUTHOR}</td></tr>
+            <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600;width:160px">Repository</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
+            <tr><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Branch</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
+            <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Commit</td><td style="padding:10px;border:1px solid #e5e7eb"><code>%s</code></td></tr>
+            <tr><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Author</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
             <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Impact</td><td style="padding:10px;border:1px solid #e5e7eb">Production should still be serving the previous stable image.</td></tr>
           </table>
           <div style="text-align:center">
-            <a href="${CI_BUILD_LINK}" style="display:inline-block;padding:11px 22px;background:#dc2626;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600">Open Failed Pipeline</a>
+            <a href="%s" style="display:inline-block;padding:11px 22px;background:#dc2626;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600">Open Failed Pipeline</a>
           </div>
         </body>
         </html>
+        HTML;
+        echo json_encode([
+            'subject' => $subject,
+            'body' => sprintf(
+                $body,
+                getenv('CI_REPO_NAME'),
+                getenv('CI_COMMIT_BRANCH'),
+                substr(getenv('CI_COMMIT_SHA'), 0, 7),
+                getenv('CI_COMMIT_AUTHOR'),
+                getenv('CI_BUILD_LINK')
+            ),
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        PHP
+        )"
+        php /opt/app/bin/console
 
   - name: email-failure
     image: *email_image
@@ -726,18 +770,21 @@ steps:
       - event: push
         branch: main
         status: [failure]
-    settings:
-      host: { from_secret: SMTP_HOST }
-      port: 587
-      username: { from_secret: SMTP_USERNAME }
-      password: { from_secret: SMTP_PASSWORD }
-      from: { from_secret: SMTP_USERNAME }
-      recipients: { from_secret: NOTIFY_EMAIL }
-      recipients_only: true
-      content_type: text/html
-      subject: >-
-        ❌ [KPS] Pipeline Failed — ${CI_REPO_NAME}@${CI_COMMIT_SHA:0:7}
-      body: |
+    environment:
+      SMTP_HOST: { from_secret: SMTP_HOST }
+      SMTP_USERNAME: { from_secret: SMTP_USERNAME }
+      SMTP_PASSWORD: { from_secret: SMTP_PASSWORD }
+      NOTIFY_EMAIL: { from_secret: NOTIFY_EMAIL }
+    commands:
+      - |
+        export PLUGIN_DSN="smtp://$SMTP_USERNAME:$SMTP_PASSWORD@$SMTP_HOST:465?verify_peer=1"
+        export PLUGIN_FROM="$(php -r 'echo json_encode(["address" => getenv("SMTP_USERNAME"), "name" => "Woodpecker CI"], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);')"
+        export PLUGIN_RECIPIENTS="$NOTIFY_EMAIL"
+        export PLUGIN_RECIPIENTS_ONLY="true"
+        export PLUGIN_CONTENT="$(php <<'PHP'
+        <?php
+        $subject = sprintf('❌ [KPS] Pipeline Failed — %s@%s', getenv('CI_REPO_NAME'), substr(getenv('CI_COMMIT_SHA'), 0, 7));
+        $body = <<<HTML
         <html>
         <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:700px;margin:0 auto;padding:24px;color:#111827">
           <div style="background:#fef2f2;border-left:4px solid #ef4444;padding:20px;border-radius:8px;margin-bottom:24px">
@@ -745,17 +792,33 @@ steps:
             <p style="margin:8px 0 0;color:#991b1b">The pipeline failed before completing all gates. Review the log and rerun after the fix.</p>
           </div>
           <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:20px">
-            <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600;width:160px">Repository</td><td style="padding:10px;border:1px solid #e5e7eb">${CI_REPO_NAME}</td></tr>
-            <tr><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Branch</td><td style="padding:10px;border:1px solid #e5e7eb">${CI_COMMIT_BRANCH}</td></tr>
-            <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Commit</td><td style="padding:10px;border:1px solid #e5e7eb"><code>${CI_COMMIT_SHA:0:7}</code></td></tr>
-            <tr><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Author</td><td style="padding:10px;border:1px solid #e5e7eb">${CI_COMMIT_AUTHOR}</td></tr>
-            <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Message</td><td style="padding:10px;border:1px solid #e5e7eb">${CI_COMMIT_MESSAGE}</td></tr>
+            <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600;width:160px">Repository</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
+            <tr><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Branch</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
+            <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Commit</td><td style="padding:10px;border:1px solid #e5e7eb"><code>%s</code></td></tr>
+            <tr><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Author</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
+            <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Message</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
           </table>
           <div style="text-align:center">
-            <a href="${CI_BUILD_LINK}" style="display:inline-block;padding:11px 22px;background:#dc2626;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600">Open Failed Pipeline</a>
+            <a href="%s" style="display:inline-block;padding:11px 22px;background:#dc2626;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600">Open Failed Pipeline</a>
           </div>
         </body>
         </html>
+        HTML;
+        echo json_encode([
+            'subject' => $subject,
+            'body' => sprintf(
+                $body,
+                getenv('CI_REPO_NAME'),
+                getenv('CI_COMMIT_BRANCH'),
+                substr(getenv('CI_COMMIT_SHA'), 0, 7),
+                getenv('CI_COMMIT_AUTHOR'),
+                getenv('CI_COMMIT_MESSAGE'),
+                getenv('CI_BUILD_LINK')
+            ),
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        PHP
+        )"
+        php /opt/app/bin/console
 
 services:
   - name: postgres
