@@ -684,7 +684,7 @@ steps:
             <h2 style="margin:0;color:#047857">✅ Pipeline Success</h2>
             <p style="margin:8px 0 0;color:#065f46">All pipeline stages passed and production deployment completed successfully.</p>
           </div>
-          <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:20px">
+          <table style="width:100%%;border-collapse:collapse;font-size:14px;margin-bottom:20px">
             <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600;width:160px">Repository</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
             <tr><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Branch</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
             <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Commit</td><td style="padding:10px;border:1px solid #e5e7eb"><code>%s</code></td></tr>
@@ -746,7 +746,7 @@ steps:
             <h2 style="margin:0;color:#b91c1c">🚨 Pipeline Failed — Auto-Rollback</h2>
             <p style="margin:8px 0 0;color:#991b1b">Pipeline Failed: canary analysis failed and production traffic was restored to the previous stable release.</p>
           </div>
-          <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:20px">
+          <table style="width:100%%;border-collapse:collapse;font-size:14px;margin-bottom:20px">
             <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600;width:160px">Repository</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
             <tr><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Branch</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
             <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Commit</td><td style="padding:10px;border:1px solid #e5e7eb"><code>%s</code></td></tr>
@@ -802,7 +802,7 @@ steps:
             <h2 style="margin:0;color:#b91c1c">❌ Pipeline Failed</h2>
             <p style="margin:8px 0 0;color:#991b1b">The pipeline failed before completing all gates. Review the log and rerun after the fix.</p>
           </div>
-          <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:20px">
+          <table style="width:100%%;border-collapse:collapse;font-size:14px;margin-bottom:20px">
             <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600;width:160px">Repository</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
             <tr><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Branch</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
             <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Commit</td><td style="padding:10px;border:1px solid #e5e7eb"><code>%s</code></td></tr>
