@@ -250,12 +250,50 @@ steps:
       - apk add --no-cache curl
       - sleep 30
       - |
-        # Basic health check using port-forward to avoid pod creation races
-        kubectl port-forward svc/todoapp-core-canary 8080:8080 -n todoapp &
+        # Verify the canary via endpoints the backend actually exposes.
+        kubectl port-forward svc/todoapp-core-canary 8080:8080 -n todoapp >/tmp/canary-port-forward.log 2>&1 &
         PF_PID=$!
-        sleep 5
-        curl -s http://localhost:8080/metrics | grep 'http_requests_total'
-        kill $PF_PID
+
+        cleanup() {
+          if kill -0 "$PF_PID" 2>/dev/null; then
+            kill "$PF_PID" 2>/dev/null || true
+            wait "$PF_PID" 2>/dev/null || true
+          fi
+        }
+
+        wait_for_json() {
+          path="$1"
+          expected="$2"
+          label="$3"
+          attempt=1
+
+          while [ "$attempt" -le 20 ]; do
+            response=$(curl -fsS "http://127.0.0.1:8080$path" 2>/tmp/canary-curl.err) || response=""
+            if [ -n "$response" ] && printf '%s' "$response" | grep -q "$expected"; then
+              echo "✅ $label check passed"
+              return 0
+            fi
+
+            if ! kill -0 "$PF_PID" 2>/dev/null; then
+              echo "❌ port-forward exited before $label succeeded"
+              cat /tmp/canary-port-forward.log
+              exit 1
+            fi
+
+            sleep 3
+            attempt=$((attempt + 1))
+          done
+
+          echo "❌ $label check failed"
+          cat /tmp/canary-curl.err 2>/dev/null || true
+          [ -f /tmp/canary-port-forward.log ] && cat /tmp/canary-port-forward.log
+          exit 1
+        }
+
+        trap cleanup EXIT
+        wait_for_json /healthz '"status":"ok"' healthz
+        wait_for_json /readyz '"status":"ready"' readyz
+        wait_for_json /api/v1/meta '"name":"TodoApp"' meta
         echo "✅ Analysis passed"
 
   # ╔═════════════════════════════════════════════════════════════════════════╗
@@ -307,6 +345,8 @@ steps:
   - name: smoke-test
     image: *kubectl_image
     depends_on: [promote-stable]
+    environment:
+      KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
     commands:
       - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
       - export KUBECONFIG=/tmp/kubeconfig
