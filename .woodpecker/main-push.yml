@@ -367,6 +367,7 @@ steps:
     commands:
       - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
       - export KUBECONFIG=/tmp/kubeconfig
+      - kubectl scale deployment/todoapp-core-canary --replicas=1 -n todoapp
       - kubectl set image deployment/todoapp-core-canary core=akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7} -n todoapp
       - kubectl rollout status deployment/todoapp-core-canary -n todoapp --timeout=180s
       - |
