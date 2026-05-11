@@ -223,3 +223,46 @@ func TestContentTypeJSON(t *testing.T) {
 		t.Errorf("Content-Type = %q, want application/json", ct)
 	}
 }
+
+func TestMetricsEndpoint_ExposesHTTPAndBusinessCounters(t *testing.T) {
+	mux := newTestMux(t)
+
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", strings.NewReader(`{"email":"metrics@example.com","password":"Str0ng!Pass","display_name":"Metrics User"}`))
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerResp := httptest.NewRecorder()
+	mux.ServeHTTP(registerResp, registerReq)
+	if registerResp.Code != http.StatusCreated {
+		t.Fatalf("POST /api/v1/auth/register status = %d, want 201", registerResp.Code)
+	}
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", strings.NewReader(`{"title":"Metric task","priority":"normal"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("X-User-ID", "metrics-user")
+	createResp := httptest.NewRecorder()
+	mux.ServeHTTP(createResp, createReq)
+	if createResp.Code != http.StatusCreated {
+		t.Fatalf("POST /api/v1/tasks status = %d, want 201", createResp.Code)
+	}
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsResp := httptest.NewRecorder()
+	mux.ServeHTTP(metricsResp, metricsReq)
+
+	if metricsResp.Code != http.StatusOK {
+		t.Fatalf("GET /metrics status = %d, want 200", metricsResp.Code)
+	}
+
+	body := metricsResp.Body.String()
+	checks := []string{
+		"todoapp_http_requests_total",
+		"route=\"POST /api/v1/tasks\"",
+		"todoapp_http_request_duration_seconds_bucket",
+		"todoapp_auth_attempts_total{operation=\"register\",result=\"success\"} 1",
+		"todoapp_task_mutations_total{operation=\"create\",result=\"success\"} 1",
+	}
+	for _, needle := range checks {
+		if !strings.Contains(body, needle) {
+			t.Fatalf("metrics output missing %q\n%s", needle, body)
+		}
+	}
+}

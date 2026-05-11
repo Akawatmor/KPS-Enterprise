@@ -1,0 +1,43 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: todoapp-canary
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: todoapp
+spec:
+  groups:
+    - name: todoapp.backend.availability
+      rules:
+        - alert: TodoAppBackendTargetDown
+          expr: min_over_time(up{namespace="todoapp",app="todoapp-core",track=~"stable|canary"}[5m]) < 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: TodoApp backend target is down
+            description: One of the stable/canary backend targets has not been scrapeable for 5 minutes.
+    - name: todoapp.backend.canary
+      rules:
+        - alert: TodoAppCanaryHigh5xxRate
+          expr: |
+            sum(rate(todoapp_http_requests_total{track="canary",status_class="5xx"}[5m]))
+            /
+            clamp_min(sum(rate(todoapp_http_requests_total{track="canary"}[5m])), 0.001)
+            > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Canary 5xx ratio is above threshold
+            description: The canary backend is serving more than 5% 5xx responses over the last 5 minutes.
+        - alert: TodoAppCanaryHighP95Latency
+          expr: |
+            histogram_quantile(0.95, sum(rate(todoapp_http_request_duration_seconds_bucket{track="canary"}[5m])) by (le))
+            > 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Canary p95 latency is above threshold
+            description: The canary backend p95 latency has been above 1 second for 5 minutes.

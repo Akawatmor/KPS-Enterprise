@@ -9,11 +9,13 @@ import (
 )
 
 func NewMux(cfg config.Config, logger *log.Logger, core *service.Service) http.Handler {
-	h := NewHandler(cfg, logger, core)
+	metrics := NewMetrics()
+	h := NewHandler(cfg, logger, core, metrics)
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", h.Healthz)
 	mux.HandleFunc("GET /readyz", h.Readyz)
+	mux.Handle("GET /metrics", metrics.Handler())
 	mux.HandleFunc("GET /api/v1/meta", h.Meta)
 
 	// Auth
@@ -59,7 +61,7 @@ func NewMux(cfg config.Config, logger *log.Logger, core *service.Service) http.H
 	mux.HandleFunc("POST /api/v1/push/subscribe", h.SavePushSubscription)
 	mux.HandleFunc("GET /api/v1/push/subscriptions", h.GetPushSubscriptions)
 
-	return withCORS(mux, cfg.AllowedOrigin)
+	return withCORS(metrics.Instrument(mux), cfg.AllowedOrigin)
 }
 
 func withCORS(next http.Handler, allowedOrigin string) http.Handler {

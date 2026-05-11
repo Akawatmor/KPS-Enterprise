@@ -1,0 +1,138 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: todoapp-overview-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/part-of: todoapp
+data:
+  todoapp-overview.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "links": [],
+      "panels": [
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "id": 1,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+          "targets": [
+            {
+              "expr": "sum(rate(todoapp_http_requests_total{track=~\"$track\"}[5m])) by (track)",
+              "legendFormat": "{{track}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Request Rate",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "id": 2,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+          "targets": [
+            {
+              "expr": "sum(rate(todoapp_http_requests_total{track=~\"$track\",status_class=\"5xx\"}[5m])) by (track) / clamp_min(sum(rate(todoapp_http_requests_total{track=~\"$track\"}[5m])) by (track), 0.001)",
+              "legendFormat": "{{track}}",
+              "refId": "A"
+            }
+          ],
+          "title": "5xx Ratio",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "id": 3,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(todoapp_http_request_duration_seconds_bucket{track=~\"$track\"}[5m])) by (le, track))",
+              "legendFormat": "{{track}}",
+              "refId": "A"
+            }
+          ],
+          "title": "p95 Latency",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "id": 4,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+          "targets": [
+            {
+              "expr": "sum(increase(todoapp_auth_attempts_total[1h])) by (operation, result)",
+              "legendFormat": "{{operation}} {{result}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Auth Attempts (1h)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+          "id": 5,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+          "targets": [
+            {
+              "expr": "sum(increase(todoapp_task_mutations_total[1h])) by (operation, result)",
+              "legendFormat": "{{operation}} {{result}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Task Mutations (1h)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+          "id": 6,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+          "targets": [
+            {
+              "expr": "sum(rate(traefik_service_requests_total{service=~\"todoapp-core.*\"}[5m])) by (service, code)",
+              "legendFormat": "{{service}} {{code}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Traefik Service Requests",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "style": "dark",
+      "templating": {
+        "list": [
+          {
+            "current": {"selected": true, "text": ["stable", "canary"], "value": ["stable", "canary"]},
+            "datasource": "Prometheus",
+            "definition": "label_values(todoapp_http_requests_total, track)",
+            "includeAll": false,
+            "multi": true,
+            "name": "track",
+            "options": [],
+            "query": {"query": "label_values(todoapp_http_requests_total, track)", "refId": "Prometheus-track-Variable-Query"},
+            "refresh": 1,
+            "type": "query"
+          }
+        ]
+      },
+      "time": {"from": "now-6h", "to": "now"},
+      "title": "TodoApp Overview",
+      "uid": "todoapp-overview",
+      "version": 1
+    }
