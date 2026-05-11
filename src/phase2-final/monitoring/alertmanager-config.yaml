@@ -1,0 +1,52 @@
+# AlertmanagerConfig — routes todoapp & monitoring alerts to email
+# Placeholders are substituted by the pipeline (monitoring-sync step):
+#   PLACEHOLDER_NOTIFY_EMAIL   → $NOTIFY_EMAIL
+#   PLACEHOLDER_SMTP_USERNAME  → $SMTP_USERNAME
+#   PLACEHOLDER_SMTP_HOST      → $SMTP_HOST
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: kps-email-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: todoapp
+spec:
+  route:
+    receiver: email-kps
+    groupBy: ['alertname', 'namespace']
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 12h
+  receivers:
+    - name: email-kps
+      emailConfigs:
+        - to: PLACEHOLDER_NOTIFY_EMAIL
+          from: PLACEHOLDER_SMTP_USERNAME
+          smarthost: PLACEHOLDER_SMTP_HOST:465
+          authUsername: PLACEHOLDER_SMTP_USERNAME
+          authPassword:
+            name: kps-alertmanager-smtp
+            key: password
+          requireTLS: true
+          headers:
+            - key: Subject
+              value: '[KPS Alert] {{ .GroupLabels.alertname }} — {{ .Status | toUpper }}'
+          html: |
+            <html><body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:16px">
+            {{ if eq .Status "firing" }}
+            <div style="background:#fef2f2;border-left:4px solid #ef4444;padding:16px;border-radius:6px;margin-bottom:16px">
+              <b style="color:#b91c1c">🚨 FIRING: {{ .GroupLabels.alertname }}</b>
+            </div>
+            {{ else }}
+            <div style="background:#ecfdf5;border-left:4px solid #10b981;padding:16px;border-radius:6px;margin-bottom:16px">
+              <b style="color:#047857">✅ RESOLVED: {{ .GroupLabels.alertname }}</b>
+            </div>
+            {{ end }}
+            {{ range .Alerts }}
+            <p><b>Summary:</b> {{ .Annotations.summary }}<br>
+            <b>Description:</b> {{ .Annotations.description }}<br>
+            <b>Namespace:</b> {{ .Labels.namespace }}<br>
+            <b>Severity:</b> {{ .Labels.severity }}</p>
+            {{ end }}
+            <p><a href="https://dashboard-kps.akawatmor.com">Open Grafana Dashboard</a></p>
+            </body></html>

@@ -305,6 +305,10 @@ steps:
     depends_on: [monitoring-bootstrap]
     environment:
       KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
+      SMTP_HOST: { from_secret: SMTP_HOST }
+      SMTP_USERNAME: { from_secret: SMTP_USERNAME }
+      SMTP_PASSWORD: { from_secret: SMTP_PASSWORD }
+      NOTIFY_EMAIL: { from_secret: NOTIFY_EMAIL }
     commands:
       - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
       - export KUBECONFIG=/tmp/kubeconfig
@@ -314,6 +318,19 @@ steps:
       - kubectl apply -f src/phase2-final/monitoring/todoapp-servicemonitor.yaml
       - kubectl apply -f src/phase2-final/monitoring/todoapp-prometheusrule.yaml
       - kubectl apply -f src/phase2-final/monitoring/todoapp-dashboard.yaml
+      - |
+        # Create SMTP secret for Alertmanager
+        kubectl create secret generic kps-alertmanager-smtp \
+          -n monitoring \
+          --from-literal=password="$SMTP_PASSWORD" \
+          --dry-run=client -o yaml | kubectl apply -f -
+      - |
+        # Apply AlertmanagerConfig (substitute email/SMTP placeholders)
+        sed \
+          -e "s|PLACEHOLDER_NOTIFY_EMAIL|$NOTIFY_EMAIL|g" \
+          -e "s|PLACEHOLDER_SMTP_USERNAME|$SMTP_USERNAME|g" \
+          -e "s|PLACEHOLDER_SMTP_HOST|$SMTP_HOST|g" \
+          src/phase2-final/monitoring/alertmanager-config.yaml | kubectl apply -f -
       - |
         TRAEFIK_IP=$(kubectl -n kube-system get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
         [ -n "$TRAEFIK_IP" ] || exit 1
@@ -650,6 +667,27 @@ steps:
       - git tag -a "$RELEASE_TAG" -m "Release $RELEASE_TAG"
       - git push "https://x-access-token:$GITHUB_TOKEN@github.com/Akawatmor/KPS-Enterprise.git" "$RELEASE_TAG"
       - echo "🏷 Created release tag $RELEASE_TAG"
+
+  # ╔═════════════════════════════════════════════════════════════════════════╗
+  # ║  STAGE 9b — POST-DEPLOY ANALYSIS                                        ║
+  # ╚═════════════════════════════════════════════════════════════════════════╝
+
+  - name: k6-load-test
+    image: *k6_image
+    depends_on: [smoke-test]
+    when: { status: [success] }
+    failure: ignore
+    commands:
+      - k6 run --env TARGET_URL=https://todoapp-kps.akawatmor.com src/phase2-final/scripts/k6/load-test.js
+
+  - name: dast-zap
+    image: ghcr.io/zaproxy/zaproxy:stable
+    depends_on: [smoke-test]
+    when: { status: [success] }
+    failure: ignore
+    commands:
+      - zap-baseline.py -t https://todoapp-kps.akawatmor.com -l WARN -I 2>&1 | tee /tmp/zap-report.txt || true
+      - echo "✅ ZAP baseline scan complete"
 
   # ╔═════════════════════════════════════════════════════════════════════════╗
   # ║  STAGE 10 — NOTIFICATIONS                                               ║

@@ -12,3 +12,8 @@ data:
   AUTH_REFRESH_TOKEN_MINUTES: "10080"
   # ALLOWED_ORIGIN must match the frontend domain for CORS.
   ALLOWED_ORIGIN: "https://todoapp-kps.akawatmor.com"
+  # ── Feature flags — read by backend/frontend via env ─────────────────────
+  # Set "true"/"false" and apply ConfigMap; pods pick up new value on restart.
+  FEATURE_DARK_MODE: "false"
+  FEATURE_CALDAV_SYNC: "true"
+  FEATURE_MULTI_ASSIGN: "false"

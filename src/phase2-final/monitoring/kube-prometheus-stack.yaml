@@ -43,6 +43,12 @@ spec:
       enabled: true
       alertmanagerSpec:
         replicas: 1
+        # Allow AlertmanagerConfig in any namespace to route any alert
+        # (without this, configs in 'monitoring' only match monitoring-namespace alerts)
+        alertmanagerConfigMatcherStrategy:
+          type: None
+        alertmanagerConfigNamespaceSelector: {}
+        alertmanagerConfigSelector: {}
         resources:
           requests:
             cpu: 50m
