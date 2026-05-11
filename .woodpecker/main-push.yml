@@ -216,7 +216,7 @@ steps:
   # ║  STAGE 6 — CANARY DEPLOY                                                ║
   # ╚═════════════════════════════════════════════════════════════════════════╝
 
-  - name: canary-deploy
+  - name: apply-cluster-manifests
     image: *kubectl_image
     depends_on: [db-prep, migration-test]
     environment:
@@ -225,6 +225,55 @@ steps:
       - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
       - export KUBECONFIG=/tmp/kubeconfig
       - kubectl apply -f src/phase2-final/k8s/
+
+  - name: iscsi-postgres-health
+    image: *kubectl_image
+    depends_on: [apply-cluster-manifests]
+    environment:
+      KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - |
+        dump_state() {
+          echo "--- PV ---"
+          kubectl get pv todoapp-postgres-pv -o wide || true
+          echo "--- PVC ---"
+          kubectl -n todoapp get pvc data-todoapp-postgres-0 -o wide || true
+          echo "--- StatefulSet ---"
+          kubectl -n todoapp get statefulset todoapp-postgres -o wide || true
+          echo "--- Pod ---"
+          kubectl -n todoapp get pod todoapp-postgres-0 -o wide || true
+          echo "--- Pod Describe ---"
+          kubectl -n todoapp describe pod todoapp-postgres-0 || true
+          echo "--- Recent Events ---"
+          kubectl -n todoapp get events --sort-by=.lastTimestamp | tail -n 40 || true
+        }
+
+        fail() {
+          echo "❌ iSCSI-backed Postgres is not healthy"
+          dump_state
+          exit 1
+        }
+
+        PV_PHASE=$(kubectl get pv todoapp-postgres-pv -o jsonpath='{.status.phase}' 2>/dev/null || true)
+        PVC_PHASE=$(kubectl -n todoapp get pvc data-todoapp-postgres-0 -o jsonpath='{.status.phase}' 2>/dev/null || true)
+
+        [ "$PV_PHASE" = "Bound" ] || fail
+        [ "$PVC_PHASE" = "Bound" ] || fail
+        kubectl -n todoapp rollout status statefulset/todoapp-postgres --timeout=180s || fail
+        kubectl -n todoapp wait --for=condition=Ready pod/todoapp-postgres-0 --timeout=120s || fail
+        kubectl -n todoapp exec todoapp-postgres-0 -- sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' || fail
+        echo "✅ iSCSI-backed Postgres is healthy"
+
+  - name: canary-deploy
+    image: *kubectl_image
+    depends_on: [iscsi-postgres-health]
+    environment:
+      KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
       - kubectl set image deployment/todoapp-core-canary core=akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7} -n todoapp
       - kubectl rollout status deployment/todoapp-core-canary -n todoapp --timeout=180s
       - |
