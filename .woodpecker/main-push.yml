@@ -224,7 +224,26 @@ steps:
     commands:
       - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
       - export KUBECONFIG=/tmp/kubeconfig
-      - kubectl apply -f src/phase2-final/k8s/
+      - |
+        # Apply static cluster resources without resetting running app images.
+        for manifest in \
+          src/phase2-final/k8s/namespace.yaml \
+          src/phase2-final/k8s/configmap.yaml \
+          src/phase2-final/k8s/core-service.yaml \
+          src/phase2-final/k8s/core-services.yaml \
+          src/phase2-final/k8s/web-service.yaml \
+          src/phase2-final/k8s/postgres-service.yaml \
+          src/phase2-final/k8s/postgres-pv.yaml \
+          src/phase2-final/k8s/postgres-pvc.yaml \
+          src/phase2-final/k8s/postgres-statefulset.yaml \
+          src/phase2-final/k8s/networkpolicy.yaml \
+          src/phase2-final/k8s/pdb.yaml \
+          src/phase2-final/k8s/pdb-hpa.yaml \
+          src/phase2-final/k8s/ingress.yaml \
+          src/phase2-final/k8s/traefik-routing.yaml
+        do
+          kubectl apply -f "$manifest"
+        done
 
   - name: iscsi-postgres-health
     image: *kubectl_image

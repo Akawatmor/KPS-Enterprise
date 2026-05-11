@@ -79,7 +79,7 @@ describe("fetchAPI", () => {
 
   afterEach(() => jest.restoreAllMocks());
 
-  it("sends X-User-ID header when no token is stored", async () => {
+  it("sends a browser-local X-User-ID header when no token is stored", async () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: true,
       status: 200,
@@ -88,12 +88,15 @@ describe("fetchAPI", () => {
 
     await fetchAPI("/tasks");
 
+    const guestID = localStorage.getItem("todoapp.guest_id");
+
     expect(global.fetch).toHaveBeenCalledWith(
       `${API_BASE}/api/v1/tasks`,
       expect.objectContaining({
-        headers: expect.objectContaining({ "X-User-ID": "local-dev-user" }),
+        headers: expect.objectContaining({ "X-User-ID": guestID }),
       }),
     );
+    expect(guestID).toMatch(/^guest_/);
   });
 
   it("sends Authorization Bearer header when a token is stored", async () => {

@@ -7,11 +7,13 @@ export const API_BASE: string = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 // ── Domain Types ──────────────────────────────────────────────────────────────
 export interface StoredUser {
   id: string;
-  username: string;
+  username?: string;
   email?: string;
   role?: string; // "user" | "admin"
   display_name?: string;
 }
+
+const GUEST_ID_KEY = "todoapp.guest_id";
 
 interface AuthExchangeResponse {
   session?: { access_token: string };
@@ -50,6 +52,24 @@ export function setStoredUser(user: StoredUser | null): void {
   else localStorage.removeItem("todoapp.user");
 }
 
+function getGuestUserID(): string {
+  if (typeof window === "undefined") {
+    return "guest-server-render";
+  }
+
+  const existing = localStorage.getItem(GUEST_ID_KEY);
+  if (existing) {
+    return existing;
+  }
+
+  const generated = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? `guest_${crypto.randomUUID()}`
+    : `guest_${Math.random().toString(36).slice(2)}_${Date.now()}`;
+
+  localStorage.setItem(GUEST_ID_KEY, generated);
+  return generated;
+}
+
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 function buildURL(endpoint: string): string {
   const path = endpoint.startsWith("/api/v1")
@@ -65,7 +85,7 @@ export async function fetchAPI<T = unknown>(
   const token = getStoredToken();
   const authHeader: Record<string, string> = token
     ? { Authorization: `Bearer ${token}` }
-    : { "X-User-ID": "local-dev-user" };
+    : { "X-User-ID": getGuestUserID() };
 
   const res = await fetch(buildURL(endpoint), {
     ...options,

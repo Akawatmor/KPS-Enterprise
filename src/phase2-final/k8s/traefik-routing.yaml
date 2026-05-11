@@ -1,0 +1,31 @@
+# Traefik routing resources for stable/canary backend traffic.
+apiVersion: traefik.io/v1alpha1
+kind: TraefikService
+metadata:
+  name: todoapp-core-weighted
+  namespace: todoapp
+spec:
+  weighted:
+    services:
+      - name: todoapp-core-stable
+        port: 8080
+        weight: 100
+      - name: todoapp-core-canary
+        port: 8080
+        weight: 0
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: todoapp-core
+  namespace: todoapp
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      priority: 100
+      match: Host(`todoapp-kps.akawatmor.com`) && (PathPrefix(`/api`) || PathPrefix(`/healthz`) || PathPrefix(`/readyz`))
+      services:
+        - kind: TraefikService
+          name: todoapp-core-weighted

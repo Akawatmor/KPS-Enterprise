@@ -161,20 +161,3 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
----
-# TraefikService — weighted load balancer between stable (100%) and canary (0%)
-# Pipeline patches weights during canary deploy / promote / rollback
-apiVersion: traefik.io/v1alpha1
-kind: TraefikService
-metadata:
-  name: todoapp-core-weighted
-  namespace: todoapp
-spec:
-  weighted:
-    services:
-      - name: todoapp-core-stable
-        port: 8080
-        weight: 100
-      - name: todoapp-core-canary
-        port: 8080
-        weight: 0
