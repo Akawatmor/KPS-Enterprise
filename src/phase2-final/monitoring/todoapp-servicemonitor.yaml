@@ -1,0 +1,30 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: todoapp-backend
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: todoapp
+spec:
+  namespaceSelector:
+    matchNames:
+      - todoapp
+  selector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - todoapp-core
+      - key: track
+        operator: In
+        values:
+          - stable
+          - canary
+  targetLabels:
+    - app
+    - track
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s

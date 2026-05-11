@@ -20,10 +20,11 @@ type Handler struct {
 	cfg    config.Config
 	logger *log.Logger
 	core   *service.Service
+	metrics *Metrics
 }
 
-func NewHandler(cfg config.Config, logger *log.Logger, core *service.Service) *Handler {
-	return &Handler{cfg: cfg, logger: logger, core: core}
+func NewHandler(cfg config.Config, logger *log.Logger, core *service.Service, metrics *Metrics) *Handler {
+	return &Handler{cfg: cfg, logger: logger, core: core, metrics: metrics}
 }
 
 func (h *Handler) Healthz(w http.ResponseWriter, r *http.Request) {
@@ -45,6 +46,9 @@ func (h *Handler) Readyz(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.core != nil {
 		if err := h.core.Ping(r.Context()); err != nil {
+			if h.metrics != nil {
+				h.metrics.RecordReadyz(err)
+			}
 			h.logger.Printf("readyz ping failed: %v", err)
 			writeError(w, http.StatusServiceUnavailable, "storage backend not reachable")
 			return
@@ -59,16 +63,25 @@ func (h *Handler) Readyz(w http.ResponseWriter, r *http.Request) {
 		}
 		// G301: directory permissions 0750 (owner rwx, group rx, others none)
 		if err := os.MkdirAll(filepath.Dir(dbPath), 0o750); err != nil {
+			if h.metrics != nil {
+				h.metrics.RecordReadyz(err)
+			}
 			writeError(w, http.StatusServiceUnavailable, "sqlite volume not writable")
 			return
 		}
 		// G302: file permissions 0600 (owner rw, no group/others access)
 		f, err := os.OpenFile(dbPath, os.O_CREATE|os.O_RDWR, 0o600) // #nosec G304 -- path is cleaned and validated above
 		if err != nil {
+			if h.metrics != nil {
+				h.metrics.RecordReadyz(err)
+			}
 			writeError(w, http.StatusServiceUnavailable, "sqlite file not writable")
 			return
 		}
 		_ = f.Close()
+	}
+	if h.metrics != nil {
+		h.metrics.RecordReadyz(nil)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":       "ready",
@@ -187,8 +200,14 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		DueAt:       req.DueAt,
 	})
 	if err != nil {
+		if h.metrics != nil {
+			h.metrics.RecordTaskMutation("create", err)
+		}
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if h.metrics != nil {
+		h.metrics.RecordTaskMutation("create", nil)
 	}
 	writeJSON(w, http.StatusCreated, task)
 }
@@ -269,8 +288,14 @@ func (h *Handler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	task, err := h.core.UpdateTask(r.Context(), r.PathValue("id"), userID, patch)
 	if err != nil {
+		if h.metrics != nil {
+			h.metrics.RecordTaskMutation("update", err)
+		}
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if h.metrics != nil {
+		h.metrics.RecordTaskMutation("update", nil)
 	}
 	writeJSON(w, http.StatusOK, task)
 }
@@ -281,8 +306,14 @@ func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.core.DeleteTask(r.Context(), r.PathValue("id"), userID); err != nil {
+		if h.metrics != nil {
+			h.metrics.RecordTaskMutation("delete", err)
+		}
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if h.metrics != nil {
+		h.metrics.RecordTaskMutation("delete", nil)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
 }
@@ -518,8 +549,14 @@ func (h *Handler) RegisterWithPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	bundle, err := h.core.RegisterWithPassword(r.Context(), req.Email, req.Password, req.DisplayName)
 	if err != nil {
+		if h.metrics != nil {
+			h.metrics.RecordAuthAttempt("register", err)
+		}
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if h.metrics != nil {
+		h.metrics.RecordAuthAttempt("register", nil)
 	}
 	writeJSON(w, http.StatusCreated, bundle)
 }
@@ -535,8 +572,14 @@ func (h *Handler) LoginWithPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	bundle, err := h.core.LoginWithPassword(r.Context(), req.Email, req.Password)
 	if err != nil {
+		if h.metrics != nil {
+			h.metrics.RecordAuthAttempt("login", err)
+		}
 		writeError(w, http.StatusUnauthorized, err.Error())
 		return
+	}
+	if h.metrics != nil {
+		h.metrics.RecordAuthAttempt("login", nil)
 	}
 	writeJSON(w, http.StatusOK, bundle)
 }

@@ -28,6 +28,25 @@ spec:
             matchLabels:
               kubernetes.io/metadata.name: kube-system
 ---
+# Allow Prometheus in the monitoring namespace to scrape backend metrics.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: todoapp-allow-from-monitoring
+  namespace: todoapp
+spec:
+  podSelector:
+    matchLabels:
+      app: todoapp-core
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 8080
+          protocol: TCP
+---
 # Allow intra-namespace communication (frontend → core → postgres)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

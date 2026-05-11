@@ -1,0 +1,73 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Woodpecker Pipeline — Release Tag (Docker Hub alias + GitHub Release)
+# ─────────────────────────────────────────────────────────────────────────────
+
+variables:
+  - &alpine_image "alpine:3.20"
+  - &skopeo_image "quay.io/skopeo/stable:latest"
+
+when:
+  event: tag
+
+steps:
+  - name: validate-release-tag
+    image: *alpine_image
+    commands:
+      - apk add --no-cache git
+      - RELEASE_TAG="${CI_COMMIT_TAG:-$(git tag --points-at "$CI_COMMIT_SHA" | sort -V | tail -n 1)}"
+      - echo "$RELEASE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'
+      - echo "✅ release tag $RELEASE_TAG is valid"
+
+  - name: retag-release-images
+    image: *skopeo_image
+    depends_on: [validate-release-tag]
+    environment:
+      DOCKER_USERNAME: { from_secret: DOCKER_USERNAME }
+      DOCKER_PASSWORD: { from_secret: DOCKER_PASSWORD }
+    commands:
+      - RELEASE_TAG="${CI_COMMIT_TAG:-$(git tag --points-at "$CI_COMMIT_SHA" | sort -V | tail -n 1)}"
+      - SHA_TAG=$(printf '%s' "$CI_COMMIT_SHA" | cut -c1-7)
+      - skopeo login --username "$DOCKER_USERNAME" --password "$DOCKER_PASSWORD" docker.io
+      - skopeo copy --all "docker://docker.io/akawatmor/todoapp-core:${SHA_TAG}" "docker://docker.io/akawatmor/todoapp-core:${RELEASE_TAG}"
+      - skopeo copy --all "docker://docker.io/akawatmor/todoapp-web:${SHA_TAG}" "docker://docker.io/akawatmor/todoapp-web:${RELEASE_TAG}"
+      - echo "✅ Docker Hub tags published for $RELEASE_TAG"
+
+  - name: create-github-release
+    image: *alpine_image
+    depends_on: [retag-release-images]
+    environment:
+      GITHUB_TOKEN: { from_secret: GITHUB_TOKEN }
+    commands:
+      - apk add --no-cache curl jq git
+      - ': "${GITHUB_TOKEN:?missing GITHUB_TOKEN secret}"'
+      - RELEASE_TAG="${CI_COMMIT_TAG:-$(git tag --points-at "$CI_COMMIT_SHA" | sort -V | tail -n 1)}"
+      - |
+        PAYLOAD=$(jq -nc \
+          --arg tag "$RELEASE_TAG" \
+          --arg target "$CI_COMMIT_SHA" \
+          '{tag_name:$tag,target_commitish:$target,name:$tag,draft:false,prerelease:false,generate_release_notes:true}')
+
+        STATUS=$(curl -sS -o /tmp/release.json -w '%{http_code}' \
+          -H "Authorization: Bearer $GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          "https://api.github.com/repos/Akawatmor/KPS-Enterprise/releases/tags/$RELEASE_TAG")
+
+        if [ "$STATUS" = "200" ]; then
+          RELEASE_ID=$(jq -r '.id' /tmp/release.json)
+          curl -fsS -X PATCH \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/Akawatmor/KPS-Enterprise/releases/$RELEASE_ID" \
+            -d "$PAYLOAD" >/tmp/release-updated.json
+          echo "✅ Updated GitHub release for $RELEASE_TAG"
+        else
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/Akawatmor/KPS-Enterprise/releases" \
+            -d "$PAYLOAD" >/tmp/release-created.json
+          echo "✅ Created GitHub release for $RELEASE_TAG"
+        fi

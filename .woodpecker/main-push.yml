@@ -5,6 +5,7 @@
 variables:
   - &go_image "golang:1.25-bookworm"
   - &node_image "node:22-bookworm-slim"
+  - &alpine_image "alpine:3.20"
   - &kubectl_image "alpine/k8s:1.31.0"
   - &trivy_image "aquasec/trivy:0.69.3"
   - &buildx_image "woodpeckerci/plugin-docker-buildx:4"
@@ -245,9 +246,82 @@ steps:
           kubectl apply -f "$manifest"
         done
 
-  - name: iscsi-postgres-health
+  - name: monitoring-bootstrap
     image: *kubectl_image
     depends_on: [apply-cluster-manifests]
+    environment:
+      KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
+      GRAFANA_ADMIN_USER: { from_secret: GRAFANA_ADMIN_USER }
+      GRAFANA_ADMIN_PASSWORD: { from_secret: GRAFANA_ADMIN_PASSWORD }
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - ': "${GRAFANA_ADMIN_USER:?missing GRAFANA_ADMIN_USER secret}"'
+      - ': "${GRAFANA_ADMIN_PASSWORD:?missing GRAFANA_ADMIN_PASSWORD secret}"'
+      - kubectl apply -f src/phase2-final/monitoring/namespace.yaml
+      - |
+        kubectl create secret generic kps-grafana-admin \
+          -n monitoring \
+          --from-literal=admin-user="$GRAFANA_ADMIN_USER" \
+          --from-literal=admin-password="$GRAFANA_ADMIN_PASSWORD" \
+          --dry-run=client -o yaml | kubectl apply -f -
+      - kubectl apply -f src/phase2-final/monitoring/traefik-helmchartconfig.yaml
+      - kubectl apply -f src/phase2-final/monitoring/kube-prometheus-stack.yaml
+      - |
+        for crd in servicemonitors.monitoring.coreos.com prometheusrules.monitoring.coreos.com; do
+          for i in $(seq 1 40); do
+            if kubectl get crd "$crd" >/dev/null 2>&1; then
+              break
+            fi
+            echo "Waiting for monitoring CRD $crd ($i/40)"
+            sleep 15
+          done
+          kubectl get crd "$crd" >/dev/null 2>&1 || exit 1
+        done
+      - |
+        GRAFANA_DEPLOY=""
+        OPERATOR_DEPLOY=""
+        PROM_STS=""
+        for i in $(seq 1 40); do
+          GRAFANA_DEPLOY=$(kubectl -n monitoring get deploy -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | grep 'grafana' | head -n 1 || true)
+          OPERATOR_DEPLOY=$(kubectl -n monitoring get deploy -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | grep 'operator' | head -n 1 || true)
+          PROM_STS=$(kubectl -n monitoring get statefulset -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | grep 'prometheus' | head -n 1 || true)
+          if [ -n "$GRAFANA_DEPLOY" ] && [ -n "$OPERATOR_DEPLOY" ] && [ -n "$PROM_STS" ]; then
+            break
+          fi
+          echo "Waiting for monitoring workloads ($i/40)"
+          sleep 15
+        done
+        [ -n "$GRAFANA_DEPLOY" ] && [ -n "$OPERATOR_DEPLOY" ] && [ -n "$PROM_STS" ] || {
+          kubectl -n monitoring get all
+          exit 1
+        }
+        kubectl -n monitoring rollout status deployment/"$OPERATOR_DEPLOY" --timeout=600s
+        kubectl -n monitoring rollout status deployment/"$GRAFANA_DEPLOY" --timeout=600s
+        kubectl -n monitoring rollout status statefulset/"$PROM_STS" --timeout=600s
+
+  - name: monitoring-sync
+    image: *kubectl_image
+    depends_on: [monitoring-bootstrap]
+    environment:
+      KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
+    commands:
+      - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
+      - export KUBECONFIG=/tmp/kubeconfig
+      - kubectl apply -f src/phase2-final/k8s/networkpolicy.yaml
+      - kubectl delete servicemonitor -n monitoring traefik --ignore-not-found
+      - kubectl apply -f src/phase2-final/monitoring/traefik-podmonitor.yaml
+      - kubectl apply -f src/phase2-final/monitoring/todoapp-servicemonitor.yaml
+      - kubectl apply -f src/phase2-final/monitoring/todoapp-prometheusrule.yaml
+      - kubectl apply -f src/phase2-final/monitoring/todoapp-dashboard.yaml
+      - |
+        TRAEFIK_IP=$(kubectl -n kube-system get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+        [ -n "$TRAEFIK_IP" ] || exit 1
+        wget -qO- --header="Host: dashboard-kps.akawatmor.com" "http://$TRAEFIK_IP/login" | grep -iq grafana
+
+  - name: iscsi-postgres-health
+    image: *kubectl_image
+    depends_on: [monitoring-sync]
     environment:
       KUBECONFIG_B64: { from_secret: KUBECONFIG_B64 }
     commands:
@@ -315,17 +389,30 @@ steps:
     commands:
       - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
       - export KUBECONFIG=/tmp/kubeconfig
-      - apk add --no-cache curl
+      - apk add --no-cache curl jq
       - sleep 30
       - |
-        # Verify the canary via endpoints the backend actually exposes.
+        # Verify the canary via backend health endpoints and Prometheus metrics.
         kubectl port-forward svc/todoapp-core-canary 8080:8080 -n todoapp >/tmp/canary-port-forward.log 2>&1 &
         PF_PID=$!
+
+        PROM_SERVICE=$(kubectl -n monitoring get svc -l app.kubernetes.io/name=prometheus -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+        [ -n "$PROM_SERVICE" ] || {
+          echo "❌ Prometheus service not found"
+          kubectl -n monitoring get svc
+          exit 1
+        }
+        kubectl port-forward -n monitoring svc/"$PROM_SERVICE" 9090:9090 >/tmp/prometheus-port-forward.log 2>&1 &
+        PROM_PID=$!
 
         cleanup() {
           if kill -0 "$PF_PID" 2>/dev/null; then
             kill "$PF_PID" 2>/dev/null || true
             wait "$PF_PID" 2>/dev/null || true
+          fi
+          if kill -0 "$PROM_PID" 2>/dev/null; then
+            kill "$PROM_PID" 2>/dev/null || true
+            wait "$PROM_PID" 2>/dev/null || true
           fi
         }
 
@@ -358,10 +445,89 @@ steps:
           exit 1
         }
 
+        wait_for_prometheus() {
+          attempt=1
+          while [ "$attempt" -le 20 ]; do
+            if curl -fsS http://127.0.0.1:9090/-/ready >/dev/null 2>&1; then
+              return 0
+            fi
+            sleep 3
+            attempt=$((attempt + 1))
+          done
+          echo "❌ Prometheus is not ready"
+          cat /tmp/prometheus-port-forward.log 2>/dev/null || true
+          exit 1
+        }
+
+        query_scalar() {
+          expr="$1"
+          curl -fsS --get http://127.0.0.1:9090/api/v1/query \
+            --data-urlencode "query=$expr" | jq -r '.data.result[0].value[1] // "0"'
+        }
+
+        wait_for_nonzero() {
+          expr="$1"
+          label="$2"
+          attempt=1
+          while [ "$attempt" -le 20 ]; do
+            value=$(query_scalar "$expr")
+            if awk -v v="$value" 'BEGIN { exit !(v > 0) }'; then
+              echo "✅ $label metric observed: $value"
+              return 0
+            fi
+            sleep 6
+            attempt=$((attempt + 1))
+          done
+          echo "❌ $label metric did not become non-zero"
+          exit 1
+        }
+
         trap cleanup EXIT
         wait_for_json /healthz '"status":"ok"' healthz
         wait_for_json /readyz '"status":"ready"' readyz
         wait_for_json /api/v1/meta '"name":"TodoApp"' meta
+
+        wait_for_prometheus
+
+        TRAEFIK_IP=$(kubectl -n kube-system get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+        [ -n "$TRAEFIK_IP" ] || {
+          echo "❌ Traefik load balancer IP missing"
+          exit 1
+        }
+
+        echo "🔥 Generating canary traffic through the weighted route"
+        for _ in $(seq 1 80); do
+          curl -fsS --max-time 10 -H "Host: todoapp-kps.akawatmor.com" "http://$TRAEFIK_IP/api/v1/meta" >/dev/null
+          curl -fsS --max-time 10 -H "Host: todoapp-kps.akawatmor.com" "http://$TRAEFIK_IP/healthz" >/dev/null
+        done
+
+        wait_for_nonzero 'sum(increase(todoapp_http_requests_total{track="canary"}[3m]))' 'canary request volume'
+
+        CANARY_ERRORS=$(query_scalar 'sum(increase(todoapp_http_requests_total{track="canary",status_class="5xx"}[3m]))')
+        CANARY_P95=$(query_scalar 'histogram_quantile(0.95, sum(rate(todoapp_http_request_duration_seconds_bucket{track="canary"}[3m])) by (le))')
+        STABLE_P95=$(query_scalar 'histogram_quantile(0.95, sum(rate(todoapp_http_request_duration_seconds_bucket{track="stable"}[3m])) by (le))')
+
+        echo "Canary 5xx count: $CANARY_ERRORS"
+        echo "Canary p95 latency: $CANARY_P95"
+        echo "Stable p95 latency: $STABLE_P95"
+
+        awk -v v="$CANARY_ERRORS" 'BEGIN { exit !(v <= 0) }' || {
+          echo "❌ Canary observed 5xx traffic"
+          exit 1
+        }
+
+        awk -v v="$CANARY_P95" 'BEGIN { exit !(v <= 1.5) }' || {
+          echo "❌ Canary p95 latency exceeded 1.5s"
+          exit 1
+        }
+
+        if awk -v stable="$STABLE_P95" 'BEGIN { exit !(stable > 0) }'; then
+          awk -v canary="$CANARY_P95" -v stable="$STABLE_P95" 'BEGIN { exit !(canary <= stable * 1.5) }' || {
+            echo "❌ Canary p95 latency is more than 1.5x stable"
+            exit 1
+          }
+        fi
+
         echo "✅ Analysis passed"
 
   # ╔═════════════════════════════════════════════════════════════════════════╗
@@ -438,13 +604,42 @@ steps:
         curl -fsS --max-time 20 https://todoapp-kps.akawatmor.com/ | grep '<title>TodoApp'
       - echo "✅ Smoke test passed"
 
+  - name: create-release-tag
+    image: *alpine_image
+    depends_on: [smoke-test]
+    when: { status: [success] }
+    environment:
+      GITHUB_TOKEN: { from_secret: GITHUB_TOKEN }
+    commands:
+      - apk add --no-cache git
+      - ': "${GITHUB_TOKEN:?missing GITHUB_TOKEN secret}"'
+      - git fetch --tags origin
+      - chmod +x src/phase2-final/scripts/release/release-plan.sh
+      - src/phase2-final/scripts/release/release-plan.sh "$CI_COMMIT_SHA" > /tmp/release.env
+      - . /tmp/release.env
+      - |
+        if [ "$RELEASE_BUMP" = "skip" ]; then
+          echo "ℹ Commit is not flagged for release tagging"
+          exit 0
+        fi
+      - |
+        if git ls-remote --exit-code --tags origin "$RELEASE_TAG" >/dev/null 2>&1; then
+          echo "ℹ Release tag $RELEASE_TAG already exists"
+          exit 0
+        fi
+      - git config user.name "Woodpecker CI"
+      - git config user.email "woodpecker@local"
+      - git tag -a "$RELEASE_TAG" -m "Release $RELEASE_TAG"
+      - git push "https://x-access-token:$GITHUB_TOKEN@github.com/Akawatmor/KPS-Enterprise.git" "$RELEASE_TAG"
+      - echo "🏷 Created release tag $RELEASE_TAG"
+
   # ╔═════════════════════════════════════════════════════════════════════════╗
   # ║  STAGE 10 — NOTIFICATIONS                                               ║
   # ╚═════════════════════════════════════════════════════════════════════════╝
 
   - name: email-success
     image: *email_image
-    depends_on: [smoke-test]
+    depends_on: [create-release-tag]
     when: { status: [success] }
     environment:
       SMTP_HOST: { from_secret: SMTP_HOST }
