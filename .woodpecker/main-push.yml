@@ -399,9 +399,24 @@ steps:
     commands:
       - echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
       - export KUBECONFIG=/tmp/kubeconfig
+      - apk add --no-cache curl ca-certificates
       - |
-        kubectl run smoke-${CI_COMMIT_SHA:0:7} --image=curlimages/curl:8.12.1 --rm -i --wait -n todoapp -- \
-          curl -sf http://todoapp-core:8080/healthz
+        TRAEFIK_IP=$(kubectl -n kube-system get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+
+        if [ -z "$TRAEFIK_IP" ]; then
+          echo "❌ traefik service has no load balancer IP"
+          kubectl -n kube-system get svc traefik -o wide
+          exit 1
+        fi
+
+        echo "🌐 Verifying Traefik via MetalLB IP: $TRAEFIK_IP"
+        curl -fsS --max-time 20 -H "Host: todoapp-kps.akawatmor.com" "http://$TRAEFIK_IP/healthz" | grep '"status":"ok"'
+
+        echo "🌍 Verifying public backend health"
+        curl -fsS --max-time 20 https://todoapp-kps.akawatmor.com/healthz | grep '"status":"ok"'
+
+        echo "🖥 Verifying public frontend root"
+        curl -fsS --max-time 20 https://todoapp-kps.akawatmor.com/ | grep '<title>TodoApp'
       - echo "✅ Smoke test passed"
 
   # ╔═════════════════════════════════════════════════════════════════════════╗
