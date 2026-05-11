@@ -370,6 +370,8 @@ steps:
       - kubectl scale deployment/todoapp-core-canary --replicas=1 -n todoapp
       - kubectl set image deployment/todoapp-core-canary core=akawatmor/todoapp-core:${CI_COMMIT_SHA:0:7} -n todoapp
       - kubectl rollout status deployment/todoapp-core-canary -n todoapp --timeout=180s
+      - sleep 20
+      - kubectl wait pod -l track=canary -n todoapp --for=condition=Ready --timeout=60s
       - |
         kubectl patch traefikservice todoapp-core-weighted -n todoapp --type=merge -p '
         {"spec":{"weighted":{"services":[
@@ -504,10 +506,18 @@ steps:
         }
 
         echo "🔥 Generating canary traffic through the weighted route"
+        TRAFFIC_ERRORS=0
         for _ in $(seq 1 80); do
-          curl -fsS --max-time 10 -H "Host: todoapp-kps.akawatmor.com" "http://$TRAEFIK_IP/api/v1/meta" >/dev/null
-          curl -fsS --max-time 10 -H "Host: todoapp-kps.akawatmor.com" "http://$TRAEFIK_IP/healthz" >/dev/null
+          S=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -H "Host: todoapp-kps.akawatmor.com" "http://$TRAEFIK_IP/api/v1/meta")
+          [ "$S" != "200" ] && TRAFFIC_ERRORS=$((TRAFFIC_ERRORS + 1))
+          S=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -H "Host: todoapp-kps.akawatmor.com" "http://$TRAEFIK_IP/healthz")
+          [ "$S" != "200" ] && TRAFFIC_ERRORS=$((TRAFFIC_ERRORS + 1))
         done
+        echo "Traffic generation done. Non-200 responses: $TRAFFIC_ERRORS / 160"
+        if [ "$TRAFFIC_ERRORS" -gt 8 ]; then
+          echo "❌ Too many traffic errors: $TRAFFIC_ERRORS / 160 (>5%)"
+          exit 1
+        fi
 
         wait_for_nonzero 'sum(increase(todoapp_http_requests_total{track="canary"}[3m]))' 'canary request volume'
 
@@ -666,13 +676,13 @@ steps:
         export PLUGIN_RECIPIENTS_ONLY="true"
         export PLUGIN_CONTENT="$(php <<'PHP'
         <?php
-        $subject = sprintf('✅ [KPS] Deployment Success — %s@%s', getenv('CI_REPO_NAME'), substr(getenv('CI_COMMIT_SHA'), 0, 7));
+        $subject = sprintf('✅ [KPS] Pipeline Success — %s@%s', getenv('CI_REPO_NAME'), substr(getenv('CI_COMMIT_SHA'), 0, 7));
         $body = <<<HTML
         <html>
         <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:700px;margin:0 auto;padding:24px;color:#111827">
           <div style="background:#ecfdf5;border-left:4px solid #10b981;padding:20px;border-radius:8px;margin-bottom:24px">
-            <h2 style="margin:0;color:#047857">✅ Deployment Succeeded</h2>
-            <p style="margin:8px 0 0;color:#065f46">Production checks passed and release-tag stage completed.</p>
+            <h2 style="margin:0;color:#047857">✅ Pipeline Success</h2>
+            <p style="margin:8px 0 0;color:#065f46">All pipeline stages passed and production deployment completed successfully.</p>
           </div>
           <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:20px">
             <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600;width:160px">Repository</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
@@ -728,13 +738,13 @@ steps:
         export PLUGIN_RECIPIENTS_ONLY="true"
         export PLUGIN_CONTENT="$(php <<'PHP'
         <?php
-        $subject = sprintf('🚨 [KPS] AUTO-ROLLBACK — %s@%s', getenv('CI_REPO_NAME'), substr(getenv('CI_COMMIT_SHA'), 0, 7));
+        $subject = sprintf('🚨 [KPS] Pipeline Failed — Auto-Rollback — %s@%s', getenv('CI_REPO_NAME'), substr(getenv('CI_COMMIT_SHA'), 0, 7));
         $body = <<<HTML
         <html>
         <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:700px;margin:0 auto;padding:24px;color:#111827">
           <div style="background:#fef2f2;border-left:4px solid #ef4444;padding:20px;border-radius:8px;margin-bottom:24px">
-            <h2 style="margin:0;color:#b91c1c">🚨 Auto-Rollback Executed</h2>
-            <p style="margin:8px 0 0;color:#991b1b">Canary analysis failed and production traffic was restored to the previous stable release.</p>
+            <h2 style="margin:0;color:#b91c1c">🚨 Pipeline Failed — Auto-Rollback</h2>
+            <p style="margin:8px 0 0;color:#991b1b">Pipeline Failed: canary analysis failed and production traffic was restored to the previous stable release.</p>
           </div>
           <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:20px">
             <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600;width:160px">Repository</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>

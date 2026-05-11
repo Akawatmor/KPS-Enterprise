@@ -18,6 +18,7 @@ spec:
     metadata:
       labels:
         app: todoapp-core
+        app.kubernetes.io/part-of: todoapp
         track: canary
     spec:
       affinity:
