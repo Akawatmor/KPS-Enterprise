@@ -695,8 +695,10 @@ steps:
           <div style="background:#f9fafb;padding:14px 16px;border-radius:8px;margin-bottom:20px;font-size:13px;line-height:1.7">
             preflight ✅ → quality ✅ → integration ✅ → build ✅ → security ✅ → deploy ✅ → smoke ✅ → release-tag ✅
           </div>
-          <div style="text-align:center">
-            <a href="%s" style="display:inline-block;padding:11px 22px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600">Open Pipeline</a>
+          <div style="text-align:center;margin-top:8px">
+            <a href="%s" style="display:inline-block;padding:10px 18px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;margin:4px">Open Pipeline</a>
+            <a href="https://todoapp-kps.akawatmor.com" style="display:inline-block;padding:10px 18px;background:#10b981;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;margin:4px">Open Production</a>
+            <a href="https://dashboard-kps.akawatmor.com" style="display:inline-block;padding:10px 18px;background:#7c3aed;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;margin:4px">Open Monitoring</a>
           </div>
         </body>
         </html>
@@ -710,7 +712,7 @@ steps:
                 substr(getenv('CI_COMMIT_SHA'), 0, 7),
                 getenv('CI_COMMIT_AUTHOR'),
                 getenv('CI_COMMIT_MESSAGE'),
-                getenv('CI_BUILD_LINK')
+                getenv('CI_BUILD_LINK') ?: 'https://woodpecker-kps.akawatmor.com'
             ),
         ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         PHP
@@ -753,8 +755,9 @@ steps:
             <tr><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Author</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
             <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Impact</td><td style="padding:10px;border:1px solid #e5e7eb">Production should still be serving the previous stable image.</td></tr>
           </table>
-          <div style="text-align:center">
-            <a href="%s" style="display:inline-block;padding:11px 22px;background:#dc2626;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600">Open Failed Pipeline</a>
+          <div style="text-align:center;margin-top:8px">
+            <a href="%s" style="display:inline-block;padding:10px 18px;background:#dc2626;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;margin:4px">Open Failed Pipeline</a>
+            <a href="https://dashboard-kps.akawatmor.com" style="display:inline-block;padding:10px 18px;background:#7c3aed;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;margin:4px">Open Monitoring</a>
           </div>
         </body>
         </html>
@@ -767,7 +770,7 @@ steps:
                 getenv('CI_COMMIT_BRANCH'),
                 substr(getenv('CI_COMMIT_SHA'), 0, 7),
                 getenv('CI_COMMIT_AUTHOR'),
-                getenv('CI_BUILD_LINK')
+                getenv('CI_BUILD_LINK') ?: 'https://woodpecker-kps.akawatmor.com'
             ),
         ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         PHP
@@ -809,8 +812,9 @@ steps:
             <tr><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Author</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
             <tr style="background:#f9fafb"><td style="padding:10px;border:1px solid #e5e7eb;font-weight:600">Message</td><td style="padding:10px;border:1px solid #e5e7eb">%s</td></tr>
           </table>
-          <div style="text-align:center">
-            <a href="%s" style="display:inline-block;padding:11px 22px;background:#dc2626;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600">Open Failed Pipeline</a>
+          <div style="text-align:center;margin-top:8px">
+            <a href="%s" style="display:inline-block;padding:10px 18px;background:#dc2626;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;margin:4px">Open Failed Pipeline</a>
+            <a href="https://dashboard-kps.akawatmor.com" style="display:inline-block;padding:10px 18px;background:#7c3aed;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;margin:4px">Open Monitoring</a>
           </div>
         </body>
         </html>
@@ -824,7 +828,7 @@ steps:
                 substr(getenv('CI_COMMIT_SHA'), 0, 7),
                 getenv('CI_COMMIT_AUTHOR'),
                 getenv('CI_COMMIT_MESSAGE'),
-                getenv('CI_BUILD_LINK')
+                getenv('CI_BUILD_LINK') ?: 'https://woodpecker-kps.akawatmor.com'
             ),
         ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         PHP

@@ -25,6 +25,31 @@ elif printf '%s' "$subject" | grep -Eq '^(fix|perf|refactor)(\(.+\))?:'; then
   bump="patch"
 fi
 
+# Also scan message body lines for conventional commit patterns
+# (covers GitHub merge commits where the PR body contains fix:/feat:)
+if [ "$bump" = "skip" ]; then
+  body=$(printf '%s' "$lower_message" | tail -n +2)
+  if printf '%s' "$body" | grep -Eq '^feat(\(.+\))?:'; then
+    bump="minor"
+  elif printf '%s' "$body" | grep -Eq '^(fix|perf|refactor)(\(.+\))?:'; then
+    bump="patch"
+  fi
+fi
+
+# For GitHub merge commits ("Merge pull request #N from owner/branch"),
+# use the branch name prefix as a last-resort fallback.
+if [ "$bump" = "skip" ]; then
+  pr_branch=$(printf '%s' "$subject" | sed -n 's/merge pull request #[0-9]* from [^/]*\/\(.*\)/\1/p')
+  if [ -n "$pr_branch" ]; then
+    branch_lower=$(printf '%s' "$pr_branch" | tr '[:upper:]' '[:lower:]')
+    if printf '%s' "$branch_lower" | grep -Eq '^(feat|feature)/'; then
+      bump="minor"
+    elif printf '%s' "$branch_lower" | grep -Eq '^(fix|hotfix|bugfix|patch)/'; then
+      bump="patch"
+    fi
+  fi
+fi
+
 version=${latest_tag#v}
 major=$(printf '%s' "$version" | cut -d. -f1)
 minor=$(printf '%s' "$version" | cut -d. -f2)
