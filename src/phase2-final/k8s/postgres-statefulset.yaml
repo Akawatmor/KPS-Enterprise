@@ -50,21 +50,21 @@ spec:
           # ── Fix A: probe แยกกัน ──────────────────────────
           livenessProbe:
             exec:
-              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
             initialDelaySeconds: 30
             periodSeconds: 30      # ← เช็คห่างๆ เพราะ heavy
             timeoutSeconds: 10
             failureThreshold: 6    # ← ใจดี ให้ retry นาน
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-h", "127.0.0.1"]
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -h 127.0.0.1"]
             initialDelaySeconds: 5
             periodSeconds: 5       # ← เช็คถี่ๆ
             timeoutSeconds: 3
             failureThreshold: 3
           startupProbe:
             exec:
-              command: ["pg_isready", "-U", "$(POSTGRES_USER)"]
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER"]
             periodSeconds: 5
             failureThreshold: 30   # ← รอได้สูงสุด 150s ตอน startup ครั้งแรก
 

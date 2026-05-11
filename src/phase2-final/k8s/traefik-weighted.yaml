@@ -9,7 +9,7 @@ metadata:
     track: canary
     app.kubernetes.io/part-of: todoapp
 spec:
-  #replicas: 1
+  replicas: 1
   selector:
     matchLabels:
       app: todoapp-core
