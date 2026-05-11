@@ -58,8 +58,8 @@ func seedUser(t *testing.T, ctx context.Context, st store.Adapter, now time.Time
 func TestListAuthProviders(t *testing.T) {
 	svc, _, _ := newSeededTestService(t)
 	providers := svc.ListAuthProviders()
-	if len(providers) != 1 || providers[0] != model.ProviderGitHub {
-		t.Fatalf("ListAuthProviders() = %v, want [github]", providers)
+	if len(providers) != 2 || providers[0] != model.ProviderGitHub || providers[1] != model.ProviderLocal {
+		t.Fatalf("ListAuthProviders() = %v, want [github local]", providers)
 	}
 }
 

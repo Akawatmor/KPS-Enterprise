@@ -44,7 +44,7 @@ async function renderAndWait(): Promise<ReturnType<typeof render>> {
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 const OPEN_TASK = {
-  id: 1,
+  id: "task-1",
   title: "Buy groceries",
   priority: "normal" as const,
   due_at: localISO(0, 10),
@@ -52,7 +52,7 @@ const OPEN_TASK = {
 };
 
 const DONE_TASK = {
-  id: 2,
+  id: "task-2",
   title: "Write report",
   priority: "high" as const,
   due_at: localISO(0, 14),
@@ -117,6 +117,21 @@ describe("HomePage", () => {
     it("shows total todo count after tasks load", async () => {
       await renderAndWait();
       expect(screen.getByText("2 total todos")).toBeInTheDocument();
+    });
+
+    it("shows the login call-to-action when browsing as guest", async () => {
+      await renderAndWait();
+      expect(screen.getByText("Login is now available.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
+    });
+
+    it("shows an error banner when the initial task load fails", async () => {
+      mockedFetchAPI.mockRejectedValueOnce(new Error("Bad Gateway"));
+
+      await renderAndWait();
+
+      expect(screen.getByText("Calendar data is unavailable")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Retry loading" })).toBeInTheDocument();
     });
   });
 
@@ -259,7 +274,7 @@ describe("HomePage", () => {
 
       await waitFor(() =>
         expect(mockedFetchAPI).toHaveBeenCalledWith(
-          "/tasks/1",
+          "/tasks/task-1",
           expect.objectContaining({
             method: "PATCH",
             body: JSON.stringify({ status: "done" }),
@@ -281,7 +296,7 @@ describe("HomePage", () => {
 
       await waitFor(() =>
         expect(mockedFetchAPI).toHaveBeenCalledWith(
-          "/tasks/2",
+          "/tasks/task-2",
           expect.objectContaining({
             method: "PATCH",
             body: JSON.stringify({ status: "open" }),
@@ -304,7 +319,7 @@ describe("HomePage", () => {
 
       await waitFor(() =>
         expect(mockedFetchAPI).toHaveBeenCalledWith(
-          expect.stringMatching(/\/tasks\/\d+/),
+          "/tasks/task-1",
           expect.objectContaining({ method: "DELETE" }),
         ),
       );

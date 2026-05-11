@@ -10,13 +10,14 @@ import {
   ChevronLeft, ChevronRight, Plus, X, Check, Pencil, Trash2,
   Calendar, Clock, Flag, AlignLeft, CheckSquare2,
 } from "lucide-react";
-import { fetchAPI } from "./modules/api";
+import AuthForm from "./components/AuthForm";
+import { fetchAPI, getStoredUser, logout, type StoredUser } from "./modules/api";
 
 // ── Domain Types ──────────────────────────────────────────────────────────────
 type Priority = "high" | "normal" | "low";
 
 interface Task {
-  id: number;
+  id: string;
   title: string;
   description?: string;
   priority: Priority;
@@ -73,6 +74,20 @@ interface ModalState {
 
 interface TasksResponse {
   items?: Array<{ task?: Task } | Task>;
+}
+
+function formatRequestError(err: unknown, fallback: string): string {
+  const message = err instanceof Error ? err.message : String(err);
+
+  if (message === "Unauthorized") {
+    return "Your session expired. Sign in again to keep working with your account.";
+  }
+
+  if (/bad gateway|http 502|<html|<!doctype/i.test(message)) {
+    return `${fallback} The cluster is returning a gateway error on this route.`;
+  }
+
+  return `${fallback} ${message}`.trim();
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -395,10 +410,26 @@ export default function HomePage(): React.JSX.Element {
   const [allTasks,     setAllTasks]     = useState<Task[]>([]);
   const [loading,      setLoading]      = useState<boolean>(true);
   const [modal,        setModal]        = useState<ModalState | null>(null);
+  const [authUser,     setAuthUser]     = useState<StoredUser | null>(null);
+  const [authOpen,     setAuthOpen]     = useState<boolean>(false);
+  const [pageError,    setPageError]    = useState<string>("");
+
+  const reportRequestError = useCallback((fallback: string, err: unknown): void => {
+    setPageError(formatRequestError(err, fallback));
+    if (err instanceof Error && err.message === "Unauthorized") {
+      setAuthUser(null);
+      setAuthOpen(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    setAuthUser(getStoredUser());
+  }, []);
 
   // Load all tasks once and keep in state
   const loadTasks = useCallback(async (): Promise<void> => {
     setLoading(true);
+    setPageError("");
     try {
       const data = await fetchAPI<TasksResponse | Task[]>("/tasks");
       const raw = Array.isArray(data) ? data : (data as TasksResponse).items ?? [];
@@ -408,11 +439,11 @@ export default function HomePage(): React.JSX.Element {
       });
       setAllTasks(items);
     } catch (err) {
-      console.error("loadTasks:", err);
+      reportRequestError("Unable to load todos.", err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [reportRequestError]);
 
   useEffect(() => { void loadTasks(); }, [loadTasks]);
 
@@ -470,7 +501,7 @@ export default function HomePage(): React.JSX.Element {
         )
       );
     } catch (err) {
-      console.error("toggle:", err);
+      reportRequestError(`Unable to update \"${task.title}\".`, err);
     }
   };
 
@@ -480,14 +511,32 @@ export default function HomePage(): React.JSX.Element {
       await fetchAPI(`/tasks/${task.id}`, { method: "DELETE" });
       setAllTasks((prev) => prev.filter((t) => t.id !== task.id));
     } catch (err) {
-      console.error("delete:", err);
+      reportRequestError(`Unable to delete \"${task.title}\".`, err);
     }
   };
 
   const handleSaved = (): void => {
+    setPageError("");
     setModal(null);
     void loadTasks();
   };
+
+  const handleAuthSuccess = (): void => {
+    setAuthUser(getStoredUser());
+    setAuthOpen(false);
+    setPageError("");
+    void loadTasks();
+  };
+
+  const handleLogout = (): void => {
+    logout();
+    setAuthUser(null);
+    setPageError("");
+    void loadTasks();
+  };
+
+  const authLabel = authUser?.display_name || authUser?.username || authUser?.email || "Signed in";
+  const showCalendarErrorState = !loading && allTasks.length === 0 && pageError !== "";
 
   const openAddModal = (date: Date | null): void => {
     setModal({ mode: "add", date: date ?? selectedDay ?? new Date() });
@@ -523,12 +572,56 @@ export default function HomePage(): React.JSX.Element {
         </nav>
 
         <div className="header-actions">
+          {authUser ? (
+            <>
+              <div className="session-pill session-pill-authenticated">
+                Signed in as {authLabel}
+              </div>
+              <button className="btn-secondary" onClick={handleLogout}>
+                Log out
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="session-pill session-pill-guest">Guest session</div>
+              <button className="btn-secondary" onClick={() => setAuthOpen(true)}>
+                Sign in
+              </button>
+            </>
+          )}
           <button className="btn-add-task" onClick={() => openAddModal(selectedDay)}>
             <Plus size={15} />
             New Todo
           </button>
         </div>
       </header>
+
+      {!authUser && !authOpen && (
+        <div className="status-banner status-banner-info" role="status">
+          <div>
+            <strong>Login is now available.</strong> Guest mode uses a browser-local ID so tasks stay separate per browser, but signing in keeps them tied to your account.
+          </div>
+          <button className="btn-secondary" onClick={() => setAuthOpen(true)}>
+            Open login
+          </button>
+        </div>
+      )}
+
+      {pageError && (
+        <div className="status-banner status-banner-error" role="alert">
+          <div>{pageError}</div>
+          <div className="status-banner-actions">
+            <button className="btn-secondary" onClick={() => void loadTasks()}>
+              Retry
+            </button>
+            {!authUser && (
+              <button className="btn-secondary" onClick={() => setAuthOpen(true)}>
+                Sign in
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Stats bar ───────────────────────────────────────────── */}
       <div className="stats-bar">
@@ -598,22 +691,40 @@ export default function HomePage(): React.JSX.Element {
           </div>
 
           {/* Grid */}
-          <div className="cal-grid">
-            {calDays.map((date) => {
-              const key   = format(date, "yyyy-MM-dd");
-              const tasks = tasksByDay[key] ?? [];
-              return (
-                <DayCell
-                  key={key}
-                  date={date}
-                  currentMonth={currentMonth}
-                  tasks={tasks}
-                  selected={selectedDay}
-                  onClick={handleDayClick}
-                />
-              );
-            })}
-          </div>
+          {showCalendarErrorState ? (
+            <div className="calendar-empty-state">
+              <div className="calendar-empty-icon">API</div>
+              <div className="calendar-empty-title">Calendar data is unavailable</div>
+              <div className="calendar-empty-copy">{pageError}</div>
+              <div className="calendar-empty-actions">
+                <button className="btn-primary" onClick={() => void loadTasks()}>
+                  Retry loading
+                </button>
+                {!authUser && (
+                  <button className="btn-secondary" onClick={() => setAuthOpen(true)}>
+                    Sign in
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="cal-grid">
+              {calDays.map((date) => {
+                const key   = format(date, "yyyy-MM-dd");
+                const tasks = tasksByDay[key] ?? [];
+                return (
+                  <DayCell
+                    key={key}
+                    date={date}
+                    currentMonth={currentMonth}
+                    tasks={tasks}
+                    selected={selectedDay}
+                    onClick={handleDayClick}
+                  />
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* ── Right Panel ───────────────────────────────────────── */}
@@ -636,6 +747,14 @@ export default function HomePage(): React.JSX.Element {
           onClose={() => setModal(null)}
           onSaved={handleSaved}
         />
+      )}
+
+      {authOpen && (
+        <div className="modal-backdrop" onClick={() => setAuthOpen(false)}>
+          <div onClick={(e: React.MouseEvent<HTMLDivElement>) => e.stopPropagation()}>
+            <AuthForm onSuccess={handleAuthSuccess} onCancel={() => setAuthOpen(false)} />
+          </div>
+        </div>
       )}
     </div>
   );

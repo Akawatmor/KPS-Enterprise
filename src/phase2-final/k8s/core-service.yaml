@@ -6,8 +6,11 @@ metadata:
   labels:
     app: todoapp-core
 spec:
+  # Compatibility alias: if anything still calls todoapp-core directly,
+  # send it to stable only so legacy and canary pods do not get mixed.
   selector:
     app: todoapp-core
+    track: stable
   ports:
     - name: http
       port: 8080

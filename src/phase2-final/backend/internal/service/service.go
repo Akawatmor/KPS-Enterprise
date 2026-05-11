@@ -128,7 +128,8 @@ func listEntities[T any](ctx context.Context, st store.Adapter, collection strin
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 func (s *Service) ListAuthProviders() []string {
-	keys := make([]string, 0, len(s.providers))
+	keys := make([]string, 0, len(s.providers)+1)
+	keys = append(keys, model.ProviderLocal)
 	for name := range s.providers {
 		keys = append(keys, name)
 	}

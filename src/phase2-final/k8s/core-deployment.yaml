@@ -1,5 +1,6 @@
-# Core (Go backend) deployment — Docker Hub image
-# Image tag is updated by Woodpecker CD on every push to main.
+# Legacy single-track backend deployment.
+# Canary/stable routing is handled by todoapp-core-stable and
+# todoapp-core-canary, so keep this deployment parked at 0 replicas.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -9,7 +10,7 @@ metadata:
     app: todoapp-core
     app.kubernetes.io/part-of: todoapp
 spec:
-  #replicas: 1
+  replicas: 0
   strategy:
     type: RollingUpdate
     rollingUpdate:

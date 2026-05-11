@@ -130,6 +130,29 @@ button { cursor: pointer; }
   gap: 0.5rem;
 }
 
+.session-pill {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.session-pill-authenticated {
+  background: var(--green-soft);
+  color: var(--green);
+  border: 1px solid rgba(74, 222, 128, 0.24);
+}
+
+.session-pill-guest {
+  background: var(--amber-soft);
+  color: var(--amber);
+  border: 1px solid rgba(251, 191, 36, 0.24);
+}
+
 .btn-add-task {
   display: flex;
   align-items: center;
@@ -590,6 +613,36 @@ button { cursor: pointer; }
   flex-shrink: 0;
 }
 
+.status-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.84rem;
+}
+
+.status-banner strong {
+  color: var(--text);
+}
+
+.status-banner-info {
+  background: rgba(14, 165, 233, 0.08);
+  color: var(--text-muted);
+}
+
+.status-banner-error {
+  background: rgba(248, 113, 113, 0.08);
+  color: #fecaca;
+}
+
+.status-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .stat-item {
   display: flex;
   align-items: center;
@@ -742,6 +795,121 @@ textarea.field-input { resize: vertical; min-height: 70px; }
   border-radius: var(--radius-sm);
 }
 
+.auth-card {
+  width: min(100%, 460px);
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.98));
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  padding: 1.4rem;
+}
+
+.auth-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.auth-card-kicker {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 0.35rem;
+}
+
+.auth-card-title {
+  font-size: 1.35rem;
+  line-height: 1.2;
+  margin-bottom: 0.45rem;
+}
+
+.auth-card-copy {
+  font-size: 0.84rem;
+  color: var(--text-muted);
+  max-width: 28rem;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.auth-card-hint {
+  font-size: 0.74rem;
+  color: var(--text-dim);
+}
+
+.auth-submit {
+  width: 100%;
+  justify-content: center;
+}
+
+.auth-card-toggle {
+  margin-top: 1rem;
+  font-size: 0.84rem;
+  color: var(--text-muted);
+}
+
+.auth-inline-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-weight: 700;
+  padding: 0;
+}
+
+.calendar-empty-state {
+  display: flex;
+  flex: 1;
+  min-height: 320px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  text-align: center;
+  gap: 0.75rem;
+  padding: 2rem;
+  background:
+    radial-gradient(circle at top, rgba(56, 189, 248, 0.12), transparent 45%),
+    linear-gradient(180deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.92));
+  border: 1px dashed rgba(148, 163, 184, 0.25);
+  border-radius: 18px;
+}
+
+.calendar-empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  background: rgba(248, 113, 113, 0.12);
+  color: var(--red);
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.calendar-empty-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.calendar-empty-copy {
+  max-width: 32rem;
+  color: var(--text-muted);
+}
+
+.calendar-empty-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 /* ── Mini month (in panel) ────────────────────────────────────────────────── */
 .select-styled {
   -webkit-appearance: none;
@@ -771,6 +939,27 @@ textarea.field-input { resize: vertical; min-height: 70px; }
   .header-nav { display: none; }
   .cal-nav-title { font-size: 1.1rem; }
   .stats-bar { gap: 0.5rem; padding: 0.4rem 1rem; overflow-x: auto; }
+  .status-banner {
+    padding: 0.75rem 1rem;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .status-banner-actions,
+  .calendar-empty-actions,
+  .header-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .session-pill {
+    width: 100%;
+    justify-content: center;
+  }
+  .auth-card {
+    padding: 1rem;
+  }
+  .auth-card-header {
+    flex-direction: column;
+  }
 }
 
 /* ── Loading skeleton ─────────────────────────────────────────────────────── */
