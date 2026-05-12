@@ -28,7 +28,8 @@
 | **การทดสอบ** | มักข้ามเพราะเสียเวลา | บังคับผ่านก่อน deploy ได้ |
 | **Rollback** | จำ version เก่าไม่ได้, ยาก | `kubectl rollout undo` ทันที |
 | **Visibility** | ไม่รู้ว่าใคร deploy อะไร เมื่อไหร่ | ดูได้จาก Woodpecker UI + Git log |
-| **Security Scan** | ไม่มี | `go vet` + `go test` บังคับผ่านก่อน build |
+| **Security Scan** | ไม่มี | Gitleaks, Hadolint, kube-score, OPA, gosec, govulncheck, Trivy, Cosign SBOM, DAST ZAP |
+| **Rollback** | `kubectl rollout undo` (ต้องทำเอง) | canary auto-rollback (อัตโนมัติเมื่อ error rate >5%) |
 | **Notification** | ไม่รู้ว่า deploy สำเร็จหรือล้มเหลว | แจ้ง Email ทันที |
 
 ### 1.2 สิ่งที่ Pipeline ทำให้ได้โดยตรง
@@ -36,23 +37,28 @@
 ```
 git push origin main
     │
-    ├── ✅ โค้ดผ่าน unit test ทุก function (`go test ./... -v -count=1`)
-    ├── ✅ go vet ผ่าน (ไม่มี compile error)
-    ├── ✅ Docker image build สำเร็จ (backend + frontend)
-    ├── ✅ Image push ไป Docker Hub ด้วย commit SHA tag (immutable)
-    ├── ✅ Rolling deploy บน K3s (zero downtime)
-    ├── ✅ Kubernetes health check (/healthz, /readyz) ผ่าน
-    └── ✅ Email notification ส่งถึงผู้รับที่กำหนด
+    ├── Stage 0  ✅ Pre-flight: Gitleaks secret scan, Hadolint, kube-score, OPA policy
+    ├── Stage 1  ✅ Quality Gates: backend (go test, gosec, govulncheck) + frontend (type-check, jest) — parallel
+    ├── Stage 2  ✅ Integration Test กับ Postgres service
+    ├── Stage 3  ✅ Build + Push Docker images (parallel: core + web) — tag = commit SHA
+    ├── Stage 4  ✅ Security: Cosign sign, SBOM CycloneDX, Trivy image scan (HIGH/CRITICAL block)
+    ├── Stage 5  ✅ DB Ops: pg_dump backup + migration test (parallel)
+    ├── Stage 6  ✅ Canary Deploy: cluster manifests, monitoring stack, canary 10%%
+    ├── Stage 7  ✅ Canary Analysis: 160 HTTP reqs + Prometheus metrics check
+    ├── Stage 8  ✅ Promote 100%% — └ Auto-Rollback ถ้า fail
+    ├── Stage 9  ✅ Smoke Test + Release Tag (สร้าง git tag อัตโนมัติ)
+    ├── Stage 9b ✅ k6 Load Test (20 VUs 60s) + DAST ZAP baseline scan
+    └── Stage 10 ✅ Email notification: HTML Success / Rollback / Failure
 ```
 
 ### 1.3 ตัวชี้วัดที่ปรับปรุง (DevOps Metrics)
 
 | Metric | ค่า (ประมาณ) | ความหมาย |
 |--------|-------------|----------|
-| **Lead Time for Change** | < 10 นาที | เวลาจาก commit ถึง production |
+| **Lead Time for Change** | < 15 นาที | เวลาจาก commit ถึง production |
 | **Deployment Frequency** | หลายครั้ง/วัน | ทำได้บ่อยขึ้นเพราะมั่นใจมากขึ้น |
-| **Mean Time to Recovery** | < 5 นาที | `kubectl rollout undo` ทันที |
-| **Change Failure Rate** | ลดลง | เพราะ test บังคับก่อน deploy |
+| **Mean Time to Recovery** | < 2 นาที | canary auto-rollback + email แจ้งทันที |
+| **Change Failure Rate** | ลดลงอย่างมีนัยสำคัญ | 10 quality/security gates กัก bug ก่อน deploy |
 
 ---
 
@@ -232,11 +238,25 @@ MetalLB แก้ด้วย:
 - Node ที่ "เป็นเจ้าของ" IP จะรับ traffic ทั้งหมดก่อน แล้วกระจายต่อผ่าน kube-proxy
 - เหมาะกับ home lab / small cluster ที่ไม่มี BGP router
 
-### 3.4 SQLite บน local-path PVC
+### 3.4 PostgreSQL + iSCSI PVC
 
-**บทบาท:** Embedded database สำหรับ Todo application (ไม่ต้องการ DB server แยก)
+**บทบาท:** Persistent relational database สำหรับ Todo application บน cluster
 
-**ทำไมใช้ SQLite แทน MongoDB (Phase 1) / PostgreSQL:**
+**การเปลี่ยนจาก SQLite เป็น PostgreSQL StatefulSet:**
+```
+SQLite + local-path PVC (local development path):
+  ✔ เริ่มต้นได้เร็ว, ไม่ต้องมี DB server
+  ✗ backend ได้แค่ 1 replica (สร้าง 2 pods พร้อมกัน mount PVC ReadWriteOnce ไม่ได้)
+  ✗ strategy ต้องเป็น Recreate (มี downtime)
+
+PostgreSQL StatefulSet + iSCSI PVC (cluster deployment path):
+  ✔ backend scale เป็น 2+ replicas, strategy เป็น RollingUpdate
+  ✔ backup ด้วย pg_dump (สร้างก่อน deploy ทุกครั้งใน pipeline)
+  ✔ data อยู่บน Synology NAS (hardware RAID) ผ่าน iSCSI
+  ✔ readiness probe ตรวจ pg_isready
+```
+
+**ปัจจุบัน:** cluster deployment ใช้ PostgreSQL, local Docker Compose ใช้ SQLite (สถาปัตยกรรม dual-mode)
 
 | ด้าน | SQLite (Phase 2) | MongoDB (Phase 1) | PostgreSQL |
 |------|:---:|:---:|:---:|

@@ -1,11 +1,12 @@
 # 🚀 แผนปรับปรุง Pipeline ให้ว้าวขึ้น
 
 > **เอกสารนี้คือ:** รายการสิ่งที่ควรเพิ่ม/เปลี่ยน จาก Pipeline เดิม เพื่อให้ดูเป็น production-grade มากขึ้น
-> เอาไปพัฒนาต่อเองได้เลย
+
+> **✅ = ดำเนินการแล้ว | ⚠️ = บางส่วน | ⏳ = ยังไม่ได้ทำ**
 
 ---
 
-## 1. เปลี่ยน SQLite → PostgreSQL
+## 1. ✅ เปลี่ยน SQLite → PostgreSQL (ดำเนินการแล้ว)
 
 **ปัญหาของ SQLite ใน Pipeline ปัจจุบัน:**
 ```
@@ -47,9 +48,11 @@ PostgreSQL แยก pod (StatefulSet + iSCSI PVC)
 
 ---
 
-## 2. เพิ่ม Trivy Security Scan ใน Pipeline
+## 2. ✅ เพิ่ม Trivy Security Scan ใน Pipeline (ดำเนินการแล้ว)
 
-**ตอนนี้ไม่มี:**
+> `sign-and-scan` step (Stage 4): Trivy scan HIGH/CRITICAL block + Cosign image sign + SBOM CycloneDX
+> ส่วน secret scan ใช้ Gitleaks (Stage 0) + gosec/govulncheck (Stage 1)
+
 ```
 build image → push → deploy เลย
 → ไม่รู้ว่า image มี CVE ร้ายแรงหรือเปล่า
@@ -77,9 +80,11 @@ build image → Trivy scan → CRITICAL พบ? → ❌ block deploy (production
 
 ---
 
-## 3. เพิ่ม Smoke Test หลัง Deploy
+## 3. ✅ เพิ่ม Smoke Test หลัง Deploy (ดำเนินการแล้ว)
 
-**ตอนนี้:**
+> `smoke-test` step (Stage 9): curl /healthz ผ่าน Traefik IP, public backend, public frontend
+> ยิ่งไปกว่านั้นมี canary analysis (Stage 7) พิสูจน์ว่า canary pod สุขภาพดีก่อน promote 100%%
+
 ```
 deploy เสร็จ → จบ pipeline → หวังว่าใช้ได้
 → pod อาจ Running แต่ API return 500 ก็ได้
@@ -109,9 +114,12 @@ deploy เสร็จ → curl /healthz → POST /api/todos → GET → DELETE
 
 ---
 
-## 4. ปรับ Email Notification ให้เป็น HTML สวย
+## 4. ✅ ปรับ Email Notification ให้เป็น HTML สวย (ดำเนินการแล้ว)
 
-**ตอนนี้ (ถ้ามี):**
+> `email-success`, `email-rollback`, `email-failure` step (Stage 10)
+> ใช้ `deblan/woodpecker-email:latest` + PHP heredoc HTML + ปุ่ม 3 สี (pipeline, production, monitoring)
+> subject แสดง ✅/🚨/❌ + repo@SHA ชัดเจน
+
 ```
 plain text → "Deploy สำเร็จ" → ดูธรรมดา
 ```
@@ -143,7 +151,10 @@ HTML email → มี table แสดง commit/branch/author/duration
 
 ---
 
-## 5. เพิ่ม PostgreSQL Backup CronJob
+## 5. ⚠️ PostgreSQL Backup CronJob (บางส่วน)
+
+> `db-prep` step ใน pipeline สร้าง pg_dump snapshot ก่อนทุก deploy
+> ยังไม่มี: CronJob สำหรับ daily backup + retention policy — ยังเป็น manual
 
 **ตอนนี้:**
 ```
@@ -173,7 +184,9 @@ CronJob ทุกคืน ตี 2 → pg_dump → gzip → เก็บบน 
 
 ---
 
-## 6. ปรับ Pipeline Flow เป็น 7 Stages (จากเดิม 4)
+## 6. ✅ ปรับ Pipeline Flow เป็น 10 Stages (ดำเนินการแล้ว)
+
+> Pipeline ปัจจุบันมี Stage 0-10 + 9b: pre-flight → quality gates (parallel) → integration → build (parallel) → security scan → DB ops (parallel) → canary deploy → canary analysis → promote/auto-rollback → smoke+release-tag → k6+ZAP → email
 
 **ตอนนี้:**
 ```

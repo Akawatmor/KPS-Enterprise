@@ -1,5 +1,10 @@
 # Requirement Change / Change Request สำหรับ Phase 2 (Woodpecker)
 
+> **✅ สถานะ: ดำเนินการแล้ว** — step `quality-frontend` ถูกเพิ่มใน `.woodpecker/main-push.yml` Stage 1
+> รัน parallel กับ `quality-backend` บังคับ `npm run type-check` และ `npm test -- --passWithNoTests --coverage` ทุก pipeline run
+
+---
+
 ## 1. หัวข้อที่เลือก
 
 **เพิ่ม Frontend Quality Gate ใน Woodpecker Pipeline** โดยบังคับให้ frontend ต้องผ่าน
@@ -41,17 +46,24 @@
 2. ถ้าทุกอย่างผ่าน จะเห็นว่า pipeline ดำเนินต่อไปจน build, push และ deploy สำเร็จ
 3. ทีมสามารถสาธิตความเปลี่ยนแปลงนี้ได้ภายในเวลาไม่นาน เพราะใช้การ push code เพียง 1 ครั้ง
 
-## 3. สถานะปัจจุบันของระบบที่เกี่ยวข้องกับ change นี้
+## 3. สถานะปัจจุบันของระบบที่เกี่ยวข้องกับ change นี้ (อัปเดต)
 
-ใน Phase 2 ปัจจุบัน pipeline หลักของ Woodpecker มี flow โดยย่อดังนี้
+✅ **Change นี้ดำเนินการแล้ว** pipeline หลักได้รับการ refactor เป็น multi-stage pipeline เต็มรูป flow รวม (10 stages) และ `quality-frontend` เป็นหนึ่งในนั้น
 
-1. `test-backend`
-2. `build-push-core`
-3. `build-push-web`
-4. `deploy-k3s`
-5. `notify-email`
+ใน `.woodpecker/main-push.yml` ปัจจุบัน pipeline มี flow ดังนี้ (อัปเดตจากเดิม 5 steps)
 
-จุดที่น่าสังเกตคือ frontend ใน repo มีความพร้อมสำหรับ quality gate อยู่แล้ว แต่ยัง **ไม่ได้ถูกบังคับใน pipeline**
+1. Stage 0: `secret-scan`, `dockerfile-lint`, `k8s-lint`, `opa-policy` (parallel)
+2. Stage 1: `quality-backend`, `quality-frontend` (parallel) ← **change นี้อยู่ที่นี่**
+3. Stage 2: `integration-test`
+4. Stage 3: `build-push-core`, `build-push-web` (parallel)
+5. Stage 4: `sign-and-scan` (Trivy, Cosign, SBOM)
+6. Stage 5: `db-prep`, `migration-test` (parallel)
+7. Stage 6: cluster deploy + canary 10%
+8. Stage 7: canary analysis
+9. Stage 8: promote/auto-rollback
+10. Stage 9: smoke-test, release-tag
+11. Stage 9b: k6 load test, DAST ZAP
+12. Stage 10: email notifications
 
 ### 3.1 หลักฐานจาก source code
 
