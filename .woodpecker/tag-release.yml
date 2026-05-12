@@ -14,7 +14,7 @@ steps:
     image: *alpine_image
     commands:
       - |
-        RELEASE_TAG="${CI_COMMIT_TAG}"
+        RELEASE_TAG="$CI_COMMIT_TAG"
         echo "$RELEASE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' \
           || { echo "ERROR: invalid tag format: $RELEASE_TAG"; exit 1; }
         echo "release tag $RELEASE_TAG is valid"
@@ -28,13 +28,20 @@ steps:
     commands:
       - |
         apk add --no-cache skopeo git
-        RELEASE_TAG="${CI_COMMIT_TAG}"
+        RELEASE_TAG="$CI_COMMIT_TAG"
         git fetch --tags --quiet
         SHA_TAG=$(git rev-list -n 1 "$RELEASE_TAG" | cut -c1-7)
+        test -n "$SHA_TAG" || { echo "ERROR: SHA_TAG is empty for $RELEASE_TAG"; exit 1; }
+        SOURCE_CORE_REF="docker://docker.io/akawatmor/todoapp-core:$SHA_TAG"
+        DEST_CORE_REF="docker://docker.io/akawatmor/todoapp-core:$RELEASE_TAG"
+        SOURCE_WEB_REF="docker://docker.io/akawatmor/todoapp-web:$SHA_TAG"
+        DEST_WEB_REF="docker://docker.io/akawatmor/todoapp-web:$RELEASE_TAG"
         echo "Release tag: $RELEASE_TAG -> source SHA tag: $SHA_TAG"
         skopeo login --username "$DOCKER_USERNAME" --password "$DOCKER_PASSWORD" docker.io
-        skopeo copy --all "docker://docker.io/akawatmor/todoapp-core:${SHA_TAG}" "docker://docker.io/akawatmor/todoapp-core:${RELEASE_TAG}"
-        skopeo copy --all "docker://docker.io/akawatmor/todoapp-web:${SHA_TAG}" "docker://docker.io/akawatmor/todoapp-web:${RELEASE_TAG}"
+        skopeo inspect "$SOURCE_CORE_REF" >/dev/null
+        skopeo inspect "$SOURCE_WEB_REF" >/dev/null
+        skopeo copy --all "$SOURCE_CORE_REF" "$DEST_CORE_REF"
+        skopeo copy --all "$SOURCE_WEB_REF" "$DEST_WEB_REF"
         echo "Docker Hub tags published for $RELEASE_TAG"
 
   - name: create-github-release
@@ -45,8 +52,8 @@ steps:
     commands:
       - |
         apk add --no-cache curl jq git
-        : "${GITHUB_TOKEN:?missing GITHUB_TOKEN secret}"
-        RELEASE_TAG="${CI_COMMIT_TAG}"
+        test -n "$GITHUB_TOKEN" || { echo "ERROR: missing GITHUB_TOKEN secret"; exit 1; }
+        RELEASE_TAG="$CI_COMMIT_TAG"
         git fetch --tags --quiet
         COMMIT_SHA=$(git rev-list -n 1 "$RELEASE_TAG")
 
