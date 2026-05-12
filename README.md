@@ -2,6 +2,19 @@
 
 ระบบ **Todo Application แบบ Full Stack** พร้อม Big Calendar UI deploy บน **K3s self-hosted cluster** (Proxmox VMs) และส่งมอบผ่าน **Woodpecker CI/CD** pipeline แบบ 10-stage ที่มี canary deploy, auto-rollback, security scanning และ monitoring ครบวงจร
 
+## 🏷️ Tags
+
+- devops
+- k3s
+- woodpecker-ci
+- canary-deploy
+- monitoring
+- trivy
+- cosign
+- k6
+- zap
+- postgres
+
 ## 📋 Project Overview (Phase 2)
 
 - **Frontend**: Next.js 14 (TypeScript, standalone mode) — Big Calendar UI
