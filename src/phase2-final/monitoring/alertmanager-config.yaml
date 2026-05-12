@@ -31,7 +31,7 @@ spec:
       emailConfigs:
         - to: PLACEHOLDER_NOTIFY_EMAIL
           from: PLACEHOLDER_SMTP_USERNAME
-          smarthost: PLACEHOLDER_SMTP_HOST:465
+          smarthost: "PLACEHOLDER_SMTP_HOST:465"
           authUsername: PLACEHOLDER_SMTP_USERNAME
           authPassword:
             name: kps-alertmanager-smtp
