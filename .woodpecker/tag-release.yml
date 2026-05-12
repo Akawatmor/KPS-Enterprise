@@ -14,9 +14,9 @@ steps:
     image: *alpine_image
     commands:
       - apk add --no-cache git
-      - RELEASE_TAG="${CI_COMMIT_TAG:-$(git tag --points-at "$CI_COMMIT_SHA" | sort -V | tail -n 1)}"
+      - RELEASE_TAG="${CI_COMMIT_TAG:-$(git tag --points-at HEAD | sort -V | tail -n 1)}"
       - echo "$RELEASE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'
-      - echo "✅ release tag $RELEASE_TAG is valid"
+      - 'printf "release tag %s is valid\n" "$RELEASE_TAG"'
 
   - name: retag-release-images
     image: *skopeo_image
@@ -28,7 +28,7 @@ steps:
       - apk add --no-cache skopeo git
       - RELEASE_TAG="${CI_COMMIT_TAG:-$(git tag --points-at HEAD | sort -V | tail -n 1)}"
       - SHA_TAG=$(git rev-parse "${RELEASE_TAG}^{}" | cut -c1-7)
-      - echo "Release tag: $RELEASE_TAG  →  source SHA tag: $SHA_TAG"
+      - 'printf "Release tag: %s -> source SHA tag: %s\n" "$RELEASE_TAG" "$SHA_TAG"'
       - skopeo login --username "$DOCKER_USERNAME" --password "$DOCKER_PASSWORD" docker.io
       - skopeo copy --all "docker://docker.io/akawatmor/todoapp-core:${SHA_TAG}" "docker://docker.io/akawatmor/todoapp-core:${RELEASE_TAG}"
       - skopeo copy --all "docker://docker.io/akawatmor/todoapp-web:${SHA_TAG}" "docker://docker.io/akawatmor/todoapp-web:${RELEASE_TAG}"
