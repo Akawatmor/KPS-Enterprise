@@ -1,19 +1,17 @@
+![DevOps](https://img.shields.io/badge/DevOps-24292e?style=for-the-badge&logo=githubactions&logoColor=white)
+![k3s](https://img.shields.io/badge/k3s-FFC61C?style=for-the-badge&logo=kubernetes&logoColor=black)
+![Woodpecker CI](https://img.shields.io/badge/Woodpecker--CI-3E3E3E?style=for-the-badge&logo=woodpecker&logoColor=white)
+![Canary Deploy](https://img.shields.io/badge/Canary--Deploy-FF8C00?style=for-the-badge&logo=aircanada&logoColor=white)
+![Monitoring](https://img.shields.io/badge/Monitoring-00BFFF?style=for-the-badge&logo=prometheus&logoColor=white)
+![Trivy](https://img.shields.io/badge/Trivy-000000?style=for-the-badge&logo=aquasecurity&logoColor=white)
+![Cosign](https://img.shields.io/badge/Cosign-5DADE2?style=for-the-badge&logo=sigstore&logoColor=white)
+![k6](https://img.shields.io/badge/k6-7D4698?style=for-the-badge&logo=k6&logoColor=white)
+![ZAP](https://img.shields.io/badge/ZAP-000000?style=for-the-badge&logo=owasp&logoColor=white)
+![Postgres](https://img.shields.io/badge/Postgres-336791?style=for-the-badge&logo=postgresql&logoColor=white)
+
 # KPS-Enterprise: TodoApp DevSecOps on K3s + Woodpecker CI/CD
 
 ระบบ **Todo Application แบบ Full Stack** พร้อม Big Calendar UI deploy บน **K3s self-hosted cluster** (Proxmox VMs) และส่งมอบผ่าน **Woodpecker CI/CD** pipeline แบบ 10-stage ที่มี canary deploy, auto-rollback, security scanning และ monitoring ครบวงจร
-
-## 🏷️ Tags
-
-- devops
-- k3s
-- woodpecker-ci
-- canary-deploy
-- monitoring
-- trivy
-- cosign
-- k6
-- zap
-- postgres
 
 ## 📋 Project Overview (Phase 2)
 
