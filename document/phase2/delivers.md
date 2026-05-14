@@ -3,6 +3,8 @@
 > **เอกสารนี้อธิบาย:** ประโยชน์ที่ได้รับจาก DevOps Pipeline, เหตุผลในการเลือกใช้เครื่องมือแต่ละตัว,  
 > การออกแบบสถาปัตยกรรม, การรับมือเมื่อเกิดข้อผิดพลาด และภาพรวม Flow การทำงานของระบบ
 
+> **Alignment note for Phase 2 Final:** เวลาอ้างอิงของจริงให้ยึด `src/phase2-final/` และ `.woodpecker/main-push.yml` เป็นหลัก ปัจจุบัน stack ที่ active คือ Go 1.25, Next.js 15.5, React 19, PostgreSQL บน K3s และ 12-stage logic ใน main push pipeline
+
 ---
 
 ## สารบัญ
@@ -58,7 +60,7 @@ git push origin main
 | **Lead Time for Change** | < 15 นาที | เวลาจาก commit ถึง production |
 | **Deployment Frequency** | หลายครั้ง/วัน | ทำได้บ่อยขึ้นเพราะมั่นใจมากขึ้น |
 | **Mean Time to Recovery** | < 2 นาที | canary auto-rollback + email แจ้งทันที |
-| **Change Failure Rate** | ลดลงอย่างมีนัยสำคัญ | 10 quality/security gates กัก bug ก่อน deploy |
+| **Change Failure Rate** | ลดลงอย่างมีนัยสำคัญ | หลายชั้นของ pre-flight, quality, sign/scan, canary และ smoke gates กัก bug ก่อน deploy |
 
 ---
 
@@ -114,19 +116,18 @@ Jenkins + GitHub ต้องการ plugin หลายตัว (GitHub Plug
 
 #### เหตุผล 4: Pipeline-as-Code ที่อ่านง่าย
 ```yaml
-# Woodpecker (.woodpecker.yml) — ชัดเจน อ่านเข้าใจได้ทันที
+# Woodpecker (.woodpecker/main-push.yml) — ตัวอย่างจาก active pipeline
 when:
   event: push
   branch: main
 
 steps:
-  - name: test-backend
-    image: golang:1.25-alpine
+  - name: quality-backend
+    image: golang:1.25-bookworm
     commands:
       - cd src/phase2-final/backend
       - go mod download
-      - go vet ./...
-      - go test ./... -v -count=1
+      - go test ./... -v -count=1 -race -coverprofile=coverage.out
 
   - name: build-push-core
     image: woodpeckerci/plugin-docker-buildx
@@ -304,7 +305,7 @@ Recreate strategy:
 | CPU (concurrent req) | ✅ goroutines (lightweight) | ⚠️ Event loop (single thread) |
 | Cold start | < 50 ms | ~300–500 ms |
 | Static binary | ✅ ไม่ต้อง runtime | ❌ ต้องการ Node runtime |
-| Built-in HTTP routing | ✅ Go 1.22+ ServeMux | ❌ ต้องใช้ Express |
+| Built-in HTTP routing | ✅ Go 1.25 ServeMux | ❌ ต้องใช้ Express |
 
 **ทำไมใช้ distroless image:**
 ```
@@ -321,7 +322,7 @@ distroless/static-debian12:nonroot:
   → CVE น้อยลง, attack surface เล็กที่สุด
 ```
 
-### 3.6 Next.js 14 Frontend
+### 3.6 Next.js 15.5 Frontend
 
 **บทบาท:** React-based frontend สำหรับ Todo UI
 
@@ -583,7 +584,7 @@ kubectl get componentstatuses 2>/dev/null || \
 
 | มาตรการ | รายละเอียด | บังคับใน Pipeline |
 |---------|-----------|------------------|
-| Unit Tests | `go test ./...` + `go vet` | ✅ step: test-backend |
+| Unit Tests | `go test ./...`, coverage, gosec, govulncheck | ✅ step: quality-backend |
 | Resource Limits | CPU/RAM limits บน K8s pods | ✅ ใน deployment YAML |
 | Readiness Probe | ไม่ส่ง traffic ไปยัง pod ที่ไม่พร้อม | ✅ `/readyz` endpoint |
 | Liveness Probe | restart pod ถ้า hang | ✅ `/healthz` endpoint |
@@ -659,7 +660,7 @@ Response กลับ User: < 100 ms (typical)
 [Developer]
     │  git push origin main
     ▼
-[Gitea Repository (git.yourdomain.com)]
+  [Git Repository / GitHub Remote]
     │  • ตรวจว่ามี .woodpecker/ directory ไหม
     │  • ส่ง webhook POST → Woodpecker Server
     ▼
@@ -673,14 +674,11 @@ Response กลับ User: < 100 ms (typical)
     │  • รับ task จาก Server
     │  • ใช้ K8s backend → สร้าง K8s Job/Pod สำหรับแต่ละ step
     │
-    │  ── Step 1: test-backend ────────────────────────────────────
-    │  สร้าง K8s Pod: image=golang:1.25-alpine
-    │  คำสั่ง:
-    │    cd src/phase2-final/backend
-    │    go mod download
-    │    go vet ./...
-    │    go test ./... -v -count=1
-    │  ✅ PASS → ไปต่อ   ❌ FAIL → หยุด pipeline + email notification
+    │  ── Stage 0-2: pre-flight + quality + integration ─────────
+    │  รัน Gitleaks, Hadolint, kube-score, OPA
+    │  รัน quality-backend + quality-frontend แบบ parallel
+    │  รัน integration test กับ Postgres
+    │  ✅ PASS → ไปต่อ   ❌ FAIL → หยุด pipeline + แจ้งผล
     │
     │  ── Step 2: build-push-core (backend) ─────────────────────
     │  สร้าง K8s Pod: image=woodpeckerci/plugin-docker-buildx
@@ -699,15 +697,11 @@ Response กลับ User: < 100 ms (typical)
     │    → image: akawatmor/todoapp-web:latest
     │  ✅ PUSH สำเร็จ
     │
-    │  ── Step 4: deploy-k3s ─────────────────────────────────────
-    │  สร้าง K8s Pod: image=bitnami/kubectl:1.29
-    │  คำสั่ง:
-    │    echo "$KUBECONFIG_B64" | base64 -d > /tmp/kubeconfig
-    │    kubectl apply -f src/phase2-final/k8s/namespace.yaml
-    │    kubectl apply -f src/phase2-final/k8s/configmap.yaml
-    │    kubectl apply -f src/phase2-final/k8s/core-pvc.yaml
-    │    kubectl set image deployment/todoapp-core \
-    │      core=akawatmor/todoapp-core:a1b2c3d -n todoapp
+    │  ── Stage 6-10: canary + verify + notify ──────────────────
+    │  apply manifests, monitoring sync, canary 10%
+    │  วิเคราะห์ metrics จาก Prometheus
+    │  promote หรือ rollback
+    │  smoke test, release tag, k6, ZAP, email notification
     │    kubectl set image deployment/todoapp-web \
     │      web=akawatmor/todoapp-web:a1b2c3d -n todoapp
     │    kubectl rollout status deployment/todoapp-core -n todoapp --timeout=180s
@@ -729,10 +723,10 @@ Response กลับ User: < 100 ms (typical)
     │  → User ไม่รู้สึก downtime ตลอดกระบวนการ
     ▼
 [Email Notification Step]
-    │  สร้าง K8s Pod: image=drillster/drone-email (หรือ woodpecker email plugin)
+  │  สร้าง K8s Pod: image=deblan/woodpecker-email:latest
     │  ส่ง Email ไปยังผู้รับที่กำหนด:
     │    ✅ Subject: "[KPS] Deploy สำเร็จ — commit:a1b2c3d branch:main"
-    │    ❌ Subject: "[KPS] Pipeline FAILED — step:test-backend commit:a1b2c3d"
+  │    ❌ Subject: "[KPS] Pipeline FAILED — stage:quality-backend commit:a1b2c3d"
     ▼
 [Email Inbox ของผู้รับ]
     • ได้รับ notification ทันที

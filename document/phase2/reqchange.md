@@ -1,240 +1,154 @@
-# Requirement Change / Change Request สำหรับ Phase 2 (Woodpecker)
+# Requirement Change / Demo Delta Strategy — Phase 2 Final
 
-> **✅ สถานะ: ดำเนินการแล้ว** — step `quality-frontend` ถูกเพิ่มใน `.woodpecker/main-push.yml` Stage 1
-> รัน parallel กับ `quality-backend` บังคับ `npm run type-check` และ `npm test -- --passWithNoTests --coverage` ทุก pipeline run
+> สถานะปัจจุบัน: **Requirement change เดิมเรื่อง frontend quality gate ดำเนินการเสร็จแล้ว** และกลายเป็นส่วนหนึ่งของ baseline ใน `.woodpecker/main-push.yml` ไปแล้ว
+
+เอกสารนี้จึงมี 2 หน้าที่พร้อมกัน
+
+1. อธิบาย requirement change เดิมที่ทำสำเร็จแล้วอย่างชัดเจน
+2. ช่วยทีมตัดสินใจว่าในวันเดโมควร “โชว์อะไร” และถ้าจำเป็นต้องมี live change ควรเลือกอะไรแทน
 
 ---
 
-## 1. หัวข้อที่เลือก
+## 1. Requirement Change เดิมที่เลือกคืออะไร
 
-**เพิ่ม Frontend Quality Gate ใน Woodpecker Pipeline** โดยบังคับให้ frontend ต้องผ่าน
+Requirement change เดิมคือ
+
+**เพิ่ม Frontend Quality Gate ใน Woodpecker Pipeline** ให้ frontend ต้องผ่าน
 
 1. `npm run type-check`
-2. `npm run test:ci`
+2. `npm test -- --passWithNoTests --coverage`
 
-ก่อนถึงขั้น `build-push-web`
+ก่อนที่ pipeline จะเดินต่อไปสู่ build/push path ของ web image
 
-## 2. เหตุผลที่เลือกหัวข้อนี้
+เหตุผลที่เลือกหัวข้อนี้ตั้งแต่แรก เพราะมันตรงกับเกณฑ์ **small, safe, observable**
 
-หัวข้อนี้ตรงตามเงื่อนไขของ requirement change ที่โจทย์กำหนดอย่างชัดเจน คือ **small, safe, observable**
+1. **Small**: เปลี่ยนเฉพาะ pipeline logic ไม่แตะ architecture หลัก
+2. **Safe**: ไม่แตะ secret จริง, database หรือ infra ที่เสี่ยง
+3. **Observable**: พิสูจน์ผลได้ทันทีจาก Woodpecker graph และ logs
 
-### 2.1 Small
+---
 
-เป็นการเปลี่ยนแปลงเล็ก เพราะไม่ต้องเปลี่ยน architecture หลักของระบบ ไม่ต้องเพิ่ม VM ไม่ต้องแก้ Kubernetes resource จำนวนมาก และไม่กระทบ data path ของ production โดยตรง
+## 2. ตอนนี้ change นี้อยู่ตรงไหนในระบบจริง
 
-สิ่งที่เพิ่มมีเพียง
+ใน Phase 2 Final change นี้ไม่ใช่แผนแล้ว แต่เป็น baseline ที่ active อยู่จริงใน `.woodpecker/main-push.yml`
 
-1. เพิ่ม pipeline step ใหม่ 1 step
-2. เพิ่ม dependency ให้ `build-push-web` รอ step นี้ผ่านก่อน
-3. ใช้สคริปต์ที่มีอยู่แล้วใน `frontend/package.json`
+ตำแหน่งใน pipeline คือ
 
-### 2.2 Safe
-
-การเปลี่ยนแปลงนี้ปลอดภัย เพราะ
-
-1. ไม่ลบ resource
-2. ไม่แตะ production credential จริง
-3. ไม่ต้องรัน `terraform destroy`
-4. ไม่เพิ่มค่าใช้จ่ายโครงสร้างพื้นฐานอย่างมีนัยสำคัญ
-5. หาก step ใหม่มีปัญหา สามารถ revert pipeline change กลับได้ทันที
-
-### 2.3 Observable
-
-ผลของการเปลี่ยนแปลงเห็นได้ชัดผ่าน Woodpecker UI และ pipeline log ทันที
-
-1. ถ้า frontend มี type error หรือ test fail จะเห็น pipeline หยุดที่ step ใหม่
-2. ถ้าทุกอย่างผ่าน จะเห็นว่า pipeline ดำเนินต่อไปจน build, push และ deploy สำเร็จ
-3. ทีมสามารถสาธิตความเปลี่ยนแปลงนี้ได้ภายในเวลาไม่นาน เพราะใช้การ push code เพียง 1 ครั้ง
-
-## 3. สถานะปัจจุบันของระบบที่เกี่ยวข้องกับ change นี้ (อัปเดต)
-
-✅ **Change นี้ดำเนินการแล้ว** pipeline หลักได้รับการ refactor เป็น multi-stage pipeline เต็มรูป flow รวม (10 stages) และ `quality-frontend` เป็นหนึ่งในนั้น
-
-ใน `.woodpecker/main-push.yml` ปัจจุบัน pipeline มี flow ดังนี้ (อัปเดตจากเดิม 5 steps)
-
-1. Stage 0: `secret-scan`, `dockerfile-lint`, `k8s-lint`, `opa-policy` (parallel)
-2. Stage 1: `quality-backend`, `quality-frontend` (parallel) ← **change นี้อยู่ที่นี่**
+1. Stage 0: `secret-scan`, `dockerfile-lint`, `k8s-lint`, `opa-policy`
+2. Stage 1: `quality-backend`, `quality-frontend`
 3. Stage 2: `integration-test`
-4. Stage 3: `build-push-core`, `build-push-web` (parallel)
-5. Stage 4: `sign-and-scan` (Trivy, Cosign, SBOM)
-6. Stage 5: `db-prep`, `migration-test` (parallel)
-7. Stage 6: cluster deploy + canary 10%
-8. Stage 7: canary analysis
-9. Stage 8: promote/auto-rollback
-10. Stage 9: smoke-test, release-tag
-11. Stage 9b: k6 load test, DAST ZAP
-12. Stage 10: email notifications
+4. Stage 3-10: build/push, sign/scan, DB ops, canary, verify, notify
 
-### 3.1 หลักฐานจาก source code
+ดังนั้นเวลาพูดหน้าห้อง ต้องพูดว่า
 
-ใน `src/phase2-final/frontend/package.json` มี script อยู่แล้ว
+> “Frontend quality gate เป็นหนึ่งใน delivered improvements ที่ทำเสร็จแล้วและอยู่ใน baseline ปัจจุบัน”
+
+ไม่ควรพูดว่า
+
+> “วันนี้เราจะเพิ่ม frontend quality gate”
+
+---
+
+## 3. หลักฐานที่ใช้ยืนยันว่า requirement change นี้เสร็จจริง
+
+### 3.1 หลักฐานใน source code
+
+ใน `src/phase2-final/frontend/package.json` มี script ที่ pipeline เรียกใช้อยู่จริง
 
 ```json
 {
-	"scripts": {
-		"type-check": "tsc --noEmit",
-		"test": "jest",
-		"test:ci": "jest --ci --coverage"
-	}
+  "scripts": {
+    "type-check": "tsc --noEmit",
+    "test": "jest",
+    "test:ci": "jest --ci --coverage"
+  }
 }
 ```
 
-และใน `src/phase2-final/frontend/__tests__/page.test.tsx` มีชุดทดสอบพฤติกรรมของหน้า Big Calendar จริง เช่น
+### 3.2 หลักฐานใน pipeline
 
-1. ตรวจว่า render header ได้
-2. ตรวจว่าแสดง weekday ครบ
-3. ตรวจ navigation เปลี่ยนเดือน
-4. ตรวจ panel เปิดเมื่อคลิกวัน
-5. ตรวจการแสดง task และสถิติ
+`quality-frontend` ใน `.woodpecker/main-push.yml` ทำงานดังนี้
 
-ดังนั้นความเสี่ยงปัจจุบันคือ
+1. `npm ci`
+2. `npm run type-check`
+3. `npm test -- --passWithNoTests --coverage`
 
-> frontend อาจมี regression เชิง type หรือเชิงพฤติกรรม แต่ยัง build image และ deploy ได้ เพราะ pipeline ปัจจุบันตรวจเฉพาะ backend เป็นหลัก
+### 3.3 หลักฐานใน UI/behavior tests
 
-## 4. ปัญหาหรือความเสี่ยงที่ change นี้ต้องการแก้
+ใน `src/phase2-final/frontend/__tests__/page.test.tsx` มีชุดทดสอบพฤติกรรมที่เกี่ยวกับหน้า Big Calendar จริง เช่น
 
-### 4.1 ปัญหาเชิงคุณภาพ
+1. render layout และ header
+2. navigation ระหว่างเดือน
+3. day panel interactions
+4. การแสดง task และสถิติ
 
-เมื่อ pipeline บังคับแค่ backend test ทีมจะยังมี blind spot ฝั่ง frontend เช่น
+ดังนั้น change นี้ไม่ได้เป็นเพียงการเพิ่ม step เปล่า ๆ แต่เป็นการย้าย quality control ของ frontend เข้าสู่ delivery path จริง
 
-1. TypeScript error ที่หลุดมาจากการ refactor component
-2. UI behavior สำคัญพัง เช่น calendar navigation, stats bar, panel interaction
-3. API contract ระหว่าง frontend กับ backend เปลี่ยนแล้ว frontend ไม่รองรับ
+---
 
-### 4.2 ผลกระทบถ้าไม่แก้
+## 4. ในวันเดโมควรใช้เอกสารนี้อย่างไร
 
-1. pipeline อาจขึ้นสีเขียวแม้ frontend มีปัญหา
-2. image ใหม่อาจถูก deploy แล้วแต่ผู้ใช้ใช้งานจริงไม่ได้ตามคาด
-3. ความเชื่อมั่นต่อ pipeline ลดลง เพราะ pipeline ไม่ครอบคลุมความเสี่ยงหลักของระบบฝั่ง UI
+### 4.1 สิ่งที่ควรเปิดให้ดู
 
-## 5. รายละเอียดของ change request ที่เสนอ
+1. `.woodpecker/main-push.yml` ตรง Stage 1
+2. `frontend/package.json`
+3. Woodpecker run ล่าสุดที่มี `quality-frontend`
 
-### 5.1 ข้อเสนอหลัก
+### 4.2 สิ่งที่ควรพูด
 
-เพิ่ม step ใหม่ชื่อ เช่น `test-frontend` ใน Woodpecker pipeline โดยให้รันก่อน `build-push-web`
+> “นี่คือหนึ่งใน requirement change ที่ทีมเลือกและทำเสร็จแล้ว เพราะมันยกระดับความน่าเชื่อถือของ pipeline ฝั่ง UI โดยไม่เพิ่ม blast radius สูง”
 
-ตัวอย่างแนวคิดของ step
+> “ดังนั้นใน Phase 2 Final สิ่งที่ควรโชว์ไม่ใช่การเพิ่มมันซ้ำ แต่โชว์ว่ามัน active อยู่จริงและทำหน้าที่เป็น gate ให้ delivery path อย่างไร”
 
-```yaml
-- name: test-frontend
-	image: node:22-bookworm-slim
-	commands:
-		- cd src/phase2-final/frontend
-		- npm ci
-		- npm run type-check
-		- npm run test:ci
-```
+### 4.3 สิ่งที่ไม่ควรพูด
 
-และปรับ dependency ของ `build-push-web` ให้ขึ้นกับ `test-frontend`
+1. อย่าพูดว่า frontend gate ยังเป็น gap
+2. อย่าพูดว่า pipeline ตรวจ backend เป็นหลักเท่านั้น
+3. อย่าพูดว่าเดโมวันนี้จะทำ change นี้แบบสดอีกครั้ง
 
-```yaml
-- name: build-push-web
-	depends_on:
-		- test-frontend
-```
+---
 
-### 5.2 สิ่งที่ change นี้ “ไม่” ทำ
+## 5. ถ้าต้องมี live change ในวันเดโมจริง ควรเลือกอะไรแทน
 
-เพื่อให้ยังคงเล็กและปลอดภัย Change นี้จะไม่ทำสิ่งต่อไปนี้
+เพราะ requirement change เดิมกลายเป็น baseline ไปแล้ว ถ้า reviewer ขอให้ “เปลี่ยนอะไรสักอย่าง” ควรเลือก delta ใหม่ที่ยังเล็ก ปลอดภัย และเห็นผลได้ โดยเรียงความเหมาะสมดังนี้
 
-1. ไม่เปลี่ยน architecture ของระบบ
-2. ไม่เปลี่ยน database
-3. ไม่แก้ secret จริงใน production
-4. ไม่เพิ่มค่าใช้จ่าย infrastructure ใหม่
-5. ไม่เปลี่ยนวิธี deploy หรือ ingress ของระบบ
+| ตัวเลือก | ไฟล์ที่แตะ | สิ่งที่เห็นบนจอ | เหตุผล |
+|---|---|---|---|
+| Frontend microcopy / release label | `src/phase2-final/frontend/...` | UI เปลี่ยนหลัง pipeline | safe และ user-facing ชัด |
+| Email wording / CTA link | `.woodpecker/main-push.yml` | notification path เปลี่ยน | ไม่แตะ runtime data path |
+| Documentation clarity | `document/phase2/report.md` หรือ `delivers.md` | reviewer เห็น reasoning ชัดขึ้น | ไม่มี runtime risk |
 
-## 6. เหตุผลเชิงวิศวกรรมว่าทำไมจึงเหมาะกับ Phase 2
+หลักสำคัญคือ
 
-### 6.1 เชื่อมกับเป้าหมายของ Woodpecker CI/CD โดยตรง
+1. ต้องเป็น delta ใหม่จาก baseline ปัจจุบัน
+2. rollback ง่าย
+3. พิสูจน์ผลได้จริงจาก UI, pipeline, หรือเอกสารที่ใช้ประกอบการ review
 
-Woodpecker มีหน้าที่เป็น quality gate ก่อน deploy อยู่แล้ว การเพิ่ม frontend gate จึงสอดคล้องกับแนวคิดเดิมของ Phase 2 โดยไม่ทำให้ workflow ซับซ้อนผิดธรรมชาติ
+---
 
-### 6.2 ใช้ประโยชน์จากสิ่งที่มีอยู่แล้วใน repo
+## 6. Acceptance Criteria ของ requirement change เดิม
 
-เนื่องจาก frontend มี `type-check` และ `Jest` test อยู่แล้ว การเพิ่ม requirement นี้ไม่ใช่การสร้างงานใหม่ทั้งหมด แต่เป็นการเอาของที่มีอยู่แล้วมาเชื่อมเข้ากับ pipeline ให้เกิดคุณค่าจริง
+Requirement change เดิมถือว่า “สำเร็จแล้ว” เพราะครบตามเกณฑ์ต่อไปนี้
 
-### 6.3 เหมาะกับเวลาทำงานจำกัด
+1. pipeline มี `quality-frontend` จริง
+2. step นี้รัน type-check และ frontend tests จริง
+3. web path จะไม่ผ่าน quality stage ถ้ามีปัญหาฝั่ง UI
+4. ทีมสามารถชี้ evidence จาก Woodpecker UI และ source code ได้
+5. requirement change นี้ถูกผนวกเป็นส่วนหนึ่งของ baseline Phase 2 Final แล้ว
 
-Change นี้สามารถสาธิตให้เห็นผลได้ภายในเวลาไม่นาน เช่น
+---
 
-1. เพิ่ม step
-2. push commit
-3. เห็น pipeline ผ่านหรือ fail ได้ทันที
+## 7. ความเสี่ยงคงเหลือและสิ่งที่ควรต่อยอด
 
-จึงเหมาะกับ requirement change ที่โจทย์ต้องการให้ “เล็ก ปลอดภัย และเห็นผลผ่าน pipeline ได้”
+แม้ requirement change เดิมจะเสร็จแล้ว แต่ยังมี next steps ที่ควรพูดต่ออย่างซื่อสัตย์ เช่น
 
-## 7. ผลที่คาดหวังหลังเปลี่ยน
+1. เพิ่ม frontend lint หรือ E2E เพื่อครอบคลุม behavior มากขึ้น
+2. ทำ synthetic CRUD checks หลัง deploy ให้ลึกกว่า `/healthz`
+3. เพิ่ม signature verification ก่อน promote เพื่อปิดลูป supply chain ให้ครบ
+4. เพิ่ม restore drill ของ backup เพื่อให้ data safety พิสูจน์ได้จริง
 
-| ด้าน | ก่อนเปลี่ยน | หลังเปลี่ยน |
-|---|---|---|
-| Quality gate | ตรวจ backend เป็นหลัก | ตรวจทั้ง backend และ frontend |
-| ความเสี่ยง UI regression | ยังมีช่องว่าง | ลดลงอย่างชัดเจน |
-| ความน่าเชื่อถือของ pipeline | ดีระดับหนึ่ง | ดีขึ้น เพราะครอบคลุมเส้นทางหลักของผู้ใช้ |
-| การสาธิตผลลัพธ์ | เห็นแค่ backend gate | เห็น failure/success ฝั่ง UI ผ่าน Woodpecker ได้ชัด |
+---
 
-## 8. วิธีทดสอบและสังเกตผลของ change นี้
+## 8. สรุป
 
-### 8.1 กรณีผ่าน (Happy Path)
-
-1. เพิ่ม step `test-frontend`
-2. push commit ที่ไม่ทำให้ frontend พัง เช่น เปลี่ยนข้อความเล็กน้อยใน UI
-3. สังเกตว่า Woodpecker รัน `type-check` และ `test:ci` ผ่าน
-4. pipeline ดำเนินต่อไปจน build/push/deploy สำเร็จ
-
-**สิ่งที่เห็นได้ชัด:** ใน Woodpecker UI จะมี step ใหม่และสถานะเป็น success
-
-### 8.2 กรณีไม่ผ่าน (Failure Path)
-
-1. สร้างการเปลี่ยนแปลงเล็ก ๆ ที่ทำให้ TypeScript error หรือ Jest fail
-2. push commit
-3. สังเกตว่า pipeline หยุดที่ `test-frontend`
-4. `build-push-web` และ `deploy-k3s` จะไม่ถูกเรียก
-
-**สิ่งที่เห็นได้ชัด:** ระบบป้องกันไม่ให้ frontend ที่มีปัญหาถูก deploy และผลลัพธ์นี้มองเห็นได้ชัดเจนจาก Woodpecker logs
-
-## 9. Acceptance Criteria
-
-การเปลี่ยนแปลงนี้ถือว่าสำเร็จเมื่อเป็นไปตามเกณฑ์ต่อไปนี้ครบ
-
-1. Pipeline มี step สำหรับ frontend quality gate อย่างน้อย 1 step
-2. Step ดังกล่าวรัน `npm run type-check` และ `npm run test:ci` ได้จริง
-3. ถ้า frontend fail pipeline ต้องหยุดก่อนถึง `build-push-web`
-4. ถ้า frontend pass pipeline ต้องดำเนินต่อได้ตามปกติ
-5. ทีมสามารถอธิบายและสาธิต success/failure path ผ่าน Woodpecker UI ได้
-
-## 10. ความเสี่ยงของการเปลี่ยนและแผนรับมือ
-
-| ความเสี่ยง | ผลกระทบ | วิธีรับมือ |
-|---|---|---|
-| เวลา pipeline เพิ่มขึ้นเล็กน้อย | feedback ช้าลงบ้าง | ใช้เฉพาะ frontend gate ที่จำเป็นก่อน |
-| test บางตัว flaky | pipeline fail โดยไม่ใช่ bug จริง | ปรับปรุง test ให้ deterministic ก่อนบังคับใช้เต็ม |
-| dependency install ช้า | ใช้เวลา build นานขึ้น | ใช้ cache ภายหลังถ้าจำเป็น |
-
-โดยรวมความเสี่ยงนี้อยู่ในระดับต่ำ และไม่กระทบ production runtime โดยตรง
-
-## 11. Rollback Plan
-
-ถ้าเพิ่ม step แล้วเกิดผลข้างเคียงที่ไม่ต้องการ สามารถ rollback ได้ง่ายมาก เพราะ change นี้แตะเพียง pipeline config
-
-แผน rollback คือ
-
-1. revert commit ที่เพิ่ม `test-frontend`
-2. push commit revert
-3. Woodpecker ใช้ pipeline เดิมทันทีในรอบถัดไป
-
-จึงเป็น change ที่มี **blast radius ต่ำมาก**
-
-## 12. ทำไม change นี้ดีกว่าข้อเสนอที่ “ไม่ควรทำ” ตามโจทย์
-
-ข้อเสนอนี้ดีกว่า requirement ที่ไม่เหมาะสม เช่น ลบ resource, destroy infra, แก้ secret จริง หรือเปลี่ยน architecture ทั้งระบบ เพราะ
-
-1. ไม่เสี่ยงทำลายสภาพแวดล้อม
-2. ไม่ทำให้ค่าใช้จ่ายเพิ่มมาก
-3. ไม่เกินขอบเขตที่ควรเสร็จและสาธิตได้ในเวลาอันสั้น
-4. เห็นผลชัดใน pipeline ตามเกณฑ์ของอาจารย์
-
-## 13. สรุป
-
-Requirement change ที่เลือกคือ **เพิ่ม frontend quality gate ให้ Woodpecker pipeline** ซึ่งเป็น change ที่เล็ก ปลอดภัย และสังเกตผลได้ชัดที่สุดสำหรับ Phase 2 ของโครงงานนี้ เพราะใช้ของที่มีอยู่แล้วใน repo, ช่วยอุดช่องโหว่สำคัญของ pipeline ปัจจุบัน และสามารถสาธิตได้ชัดทั้งกรณีผ่านและกรณี fail โดยไม่กระทบ production resource หรือทำให้โครงงานบานปลายเกินความจำเป็น
-
-หากจะเลือกเพียงหนึ่ง change request สำหรับ Phase 2 เพื่อโชว์การคิดแบบ DevOps ที่ pragmatic ที่สุด หัวข้อนี้ถือว่าเหมาะมาก เพราะมันเชื่อมตรงกับคุณภาพของ software delivery ไม่ใช่แค่เพิ่ม feature ในเอกสาร
+เอกสาร requirement change ของ Phase 2 Final ควรถูกมองเป็น **หลักฐานของการปรับปรุงที่ทำเสร็จแล้ว** ไม่ใช่รายการสิ่งที่จะทำในเดโมอีกครั้ง สิ่งที่ทีมควรทำในวันนำเสนอคือเปิดให้เห็นว่า `quality-frontend` อยู่ใน baseline จริง, ทำงานจริง, และช่วยยกระดับความน่าเชื่อถือของ delivery path อย่างไร จากนั้นถ้าจำเป็นต้องมี live change เพิ่ม ให้เลือก delta ใหม่ที่ไม่ทับกับของที่ทำเสร็จแล้ว

@@ -2,515 +2,323 @@
 
 ## 1. วัตถุประสงค์ของคลิปนี้
 
-คลิปนี้ไม่ใช่เวอร์ชัน “โชว์สดแบบเสี่ยงที่สุด” แต่เป็นเวอร์ชันอธิบายภาพรวมของระบบ, workflow, แนวคิด, และ evidence ให้ผู้ชมเข้าใจครบตั้งแต่ application, infrastructure, CI/CD, ไปจนถึง DevOpsSec และ change request ที่เลือกใช้ในวันเดโมจริง
+คลิปนี้ควรทำหน้าที่เป็น “ภาพรวมที่ชัดและซื่อสัตย์” ของ Phase 2 Final โดยให้คนดูเข้าใจว่าโปรเจกต์นี้มีทั้ง application, infrastructure, CI/CD, observability และ evidence flow ที่ต่อกันจริง
 
-เป้าหมายของคลิปมี 4 ข้อ
+สิ่งที่คลิปนี้ต้องทำให้ได้มี 4 ข้อ
 
-1. ให้คนดูเข้าใจระบบทั้งหมดใน Phase 2 โดยไม่ต้องเปิด repo เอง
-2. ให้เห็น flow ตั้งแต่ user-facing app ไปจนถึง pipeline และ deployment
-3. ให้เห็นแนวคิดที่ใช้ตัดสินใจ เช่น small-safe-observable, quality gate, rollout, rollback, feedback loop
-4. ให้ใช้คลิปนี้เป็น baseline อ้างอิงได้ในวันรีวิวหรือเวลาส่งงาน
+1. อธิบาย baseline ของระบบโดยยึด source of truth ที่ active จริง
+2. ชี้ delivered improvements ที่สำคัญโดยมีภาพหรือ log รองรับ
+3. ทำให้คนดูเข้าใจเส้นทางตั้งแต่ `git push` ไปจนถึง canary, promote/rollback, smoke test และ notification
+4. ทิ้งภาพจำว่า Phase 2 Final พร้อมให้กลุ่มถัดไปเริ่มจาก baseline นี้ได้ทันที
 
----
+ประโยคเปิดที่เหมาะที่สุด
 
-## 2. ความยาวที่แนะนำ
-
-ความยาวแนะนำคือ 12–15 นาที ถ้าจำเป็นต้องตัดให้สั้น ให้ลดเวลาตอนเปิด repo tree และลดช่วงอธิบายรายละเอียดของ test file แต่ยังต้องคง 5 ส่วนนี้ไว้
-
-1. ภาพรวมระบบ
-2. สถาปัตยกรรมและ deployment path
-3. pipeline และ feedback loop
-4. baseline runtime evidence
-5. แนวคิด DevOpsSec และ live change ที่เลือก
+> “คลิปนี้ไม่ได้มีเป้าหมายแค่โชว์ว่าแอปรันได้ แต่จะอธิบายว่าระบบนี้ถูก build, verify, deploy, observe และย้อนหลักฐานได้อย่างไรใน Phase 2 Final”
 
 ---
 
-## 3. หน้าจอที่ต้องเตรียมก่อนเริ่มอัด
+## 2. Message หลักที่ควรส่งผ่านในคลิป
+
+1. TodoApp Big Calendar คือปลายทางที่ผู้ใช้เห็น
+2. K3s + Traefik + PostgreSQL คือ runtime baseline ที่ระบบใช้อยู่จริง
+3. `.woodpecker/main-push.yml` คือ delivery baseline ที่ active จริง
+4. จุดเด่นคือ canary analysis, signed/scanned images, smoke test, monitoring และ notification
+5. สิ่งที่พูดต้องแยกชัดว่า **implemented now** กับ **next step**
+
+สิ่งที่ไม่ควรพูดในคลิป
+
+1. อย่าพูดว่า active pipeline อยู่ใน `src/phase2-final/.woodpecker.yml`
+2. อย่าพูดว่า frontend quality gate เป็นสิ่งที่จะเพิ่ม เพราะมันมีแล้ว
+3. อย่าพูดว่า Trivy, Cosign, SBOM หรือ canary 10% เป็นของอนาคต เพราะอยู่ใน main push pipeline แล้ว
+
+---
+
+## 3. ความยาวที่แนะนำ
+
+ความยาวที่เหมาะคือ 12–15 นาที
+
+ถ้าต้องตัดให้สั้น ให้คง 6 ส่วนนี้ไว้เสมอ
+
+1. ภาพรวมโปรเจกต์และ source of truth
+2. หน้าแอปจริง
+3. runtime architecture + manifests สำคัญ
+4. main push pipeline และ delivered improvements
+5. evidence จาก Woodpecker / monitoring / notification
+6. สรุปว่าอะไรคือ baseline ที่กลุ่มถัดไปควร assume ได้
+
+---
+
+## 4. หน้าจอที่ต้องเตรียมก่อนเริ่มอัด
 
 1. Slide deck `presentation/final-phase2/slides.md`
-2. Browser tab หน้า TodoApp Big Calendar
-3. VS Code เปิด folder `src/phase2-final`
-4. VS Code tab ที่ `.woodpecker.yml`
-5. VS Code tab ที่ `k8s/core-deployment.yaml`, `k8s/postgres-statefulset.yaml`, `k8s/ingress.yaml`
-6. VS Code tab ที่ `frontend/package.json` และ `frontend/__tests__/page.test.tsx`
-7. Terminal พร้อม `kubectl`
-8. Woodpecker UI หรืออย่างน้อย screenshot/log ของ run สำเร็จล่าสุด
+2. Browser หน้า `https://todoapp-kps.akawatmor.com`
+3. VS Code เปิด `.woodpecker/main-push.yml`
+4. VS Code tab สำรองที่
+   - `src/phase2-final/k8s/ingress.yaml`
+   - `src/phase2-final/k8s/traefik-routing.yaml`
+   - `src/phase2-final/k8s/postgres-statefulset.yaml`
+   - `src/phase2-final/frontend/package.json`
+   - `document/phase2/report.md`
+5. Terminal พร้อม `kubectl`
+6. Woodpecker UI login แล้ว
+7. ถ้าทำได้ เปิด Grafana หรือ screenshot dashboard ที่อธิบายได้จริง
 
 ข้อห้ามระหว่างอัด
 
-1. อย่าเปิดหน้า secret settings ของ Woodpecker แบบเห็นค่า
-2. อย่าให้ terminal แสดง token, password, หรือ kubeconfig แบบเต็ม
-3. อย่าอัดตอน notifications เด้งบนหน้าจอ
-4. อย่าเลื่อนไฟล์เร็วเกินจนคนดูอ่านตามไม่ทัน
+1. อย่าให้ secret, token หรือ kubeconfig เต็มโผล่บนจอ
+2. อย่า scroll YAML เร็วจนคนดูอ่านไม่ทัน
+3. ถ้าใช้ evidence จาก run เก่า ต้องบอกตรง ๆ ว่าเป็น run ล่าสุดที่บันทึกไว้ ไม่ใช่ live run ขณะอัด
 
 ---
 
-## 4. Shot List สรุปแบบเร็ว
+## 5. Shot List แบบสรุปเร็ว
 
 | Scene | เวลา | จอที่ต้องเปิด | เป้าหมาย |
 |---|---|---|---|
-| 1 | 0:00–0:40 | Slide ปก | บอก scope และ source of truth |
-| 2 | 0:40–1:40 | Slide agenda / project context | บอกว่าระบบนี้แก้อะไรและ Phase 2 ต่างจากเดิมอย่างไร |
-| 3 | 1:40–3:10 | Browser หน้าแอป | โชว์ user-facing baseline |
-| 4 | 3:10–4:20 | Slide architecture | อธิบาย Browser → Ingress → Web/Core → Postgres |
-| 5 | 4:20–5:40 | VS Code `k8s/` | ชี้ manifests สำคัญและ deployment strategy |
-| 6 | 5:40–7:10 | VS Code `.woodpecker.yml` | อธิบาย pipeline baseline |
-| 7 | 7:10–8:20 | Terminal `kubectl` | โชว์ runtime evidence และ rollout thinking |
-| 8 | 8:20–9:40 | `reqchange.md`, `package.json`, tests | อธิบาย live change ที่เลือก |
-| 9 | 9:40–11:10 | Slide DevOpsSec / docs | อธิบาย security, feedback loop, rollback, observability |
-| 10 | 11:10–12:30 | Slide recap | สรุป baseline ที่กลุ่มถัดไปควรอ้างต่อ |
+| 1 | 0:00–0:45 | Slide ปก | ตั้ง scope และ source of truth |
+| 2 | 0:45–2:00 | Slide overview | บอก message หลักของ Phase 2 Final |
+| 3 | 2:00–3:20 | Browser หน้าแอป | โชว์ user-facing baseline |
+| 4 | 3:20–4:50 | Slide architecture + manifests | อธิบาย runtime path และ weighted route |
+| 5 | 4:50–7:20 | `.woodpecker/main-push.yml` | อธิบาย stage 0-10 แบบเป็นกลุ่ม |
+| 6 | 7:20–8:30 | Terminal | ยืนยัน runtime state บน cluster |
+| 7 | 8:30–10:30 | Woodpecker UI | ชี้ delivered improvements จาก graph และ logs |
+| 8 | 10:30–11:40 | Monitoring / email / docs | ปิด feedback loop ให้ครบ |
+| 9 | 11:40–12:40 | Slide DevOpsSec / recap | สรุป implemented now vs next step |
+| 10 | 12:40–13:20 | Slide closing | บอก baseline ที่กลุ่มถัดไปควร assume |
 
-ถ้าคลิปยาวได้ถึง 15 นาที ให้เพิ่ม Scene พิเศษสำหรับ Q&A simulation หรือ risk discussion อีก 2–3 นาทีท้าย
-
----
-
-## 4.1 Cue Sheet แบบละเอียดมาก
-
-ส่วนนี้ใช้เป็นแผ่นกันลืมระหว่างอัดจริง ถ้าไม่อยากเปิดดูหลาย section ให้ดูตารางนี้ก่อนแล้วค่อยลง Scene detail ด้านล่าง
-
-| Scene | เปิดอะไร | ทำอะไรบนจอ | ประโยคหลักที่ควรพูด |
-|---|---|---|---|
-| 1 | Slide ปก | ค้างหน้าปก 5–8 วินาที | “คลิปนี้อธิบายภาพรวมของ KPS-Enterprise Phase 2 โดยยึด Phase 2 เป็น source of truth หลัก” |
-| 2 | Slide overview | เลื่อนไป agenda/context | “เราจะดูทั้ง app, architecture, pipeline และ DevOpsSec ไม่ใช่แค่หน้าเว็บ” |
-| 3 | Browser หน้าแอป | คลิกวันหนึ่งวัน, ชี้ panel และ stats | “ปลายทางของทุก deploy คือประสบการณ์ผู้ใช้ตรงนี้” |
-| 4 | Slide architecture | ชี้ Browser → Ingress → Web/Core → Postgres | “runtime path ต้องถูกอธิบายให้ชัดก่อนจะพูดเรื่อง deploy” |
-| 5 | VS Code `k8s/` | ชี้ replicas, RollingUpdate, probes, ingress | “สิ่งที่เล่าใน slide มีหลักฐานใน manifest จริง” |
-| 6 | VS Code `.woodpecker.yml` | ชี้ test, build, deploy, verify, notify | “หลัง `git push` pipeline จะสร้าง feedback loop กลับมา” |
-| 7 | Terminal | รัน `kubectl get pods -n todoapp` และ `get deploy` | “runtime evidence ยืนยันว่า baseline นี้ขึ้นจริงบน cluster” |
-| 8 | `reqchange.md`, `package.json`, tests | ชี้ quality gate ที่เลือก | “change นี้ small, safe, observable และมีของรองรับอยู่แล้วใน repo” |
-| 9 | Slide DevOpsSec | ชี้ current vs next | “เรามี baseline แล้ว แต่ยังมีพื้นที่ให้เสริม security gate และ observability” |
-| 10 | Slide recap | ค้างหน้าสรุป 8–10 วินาที | “baseline นี้คือสิ่งที่กลุ่มถัดไปควร assume ได้เลย” |
+ถ้าคลิปยาวได้ 15 นาที ให้เพิ่ม Q&A simulation 1–2 นาทีท้าย
 
 ---
 
-## 4.2 เปิดอะไรล่วงหน้าก่อนกดอัด
+## 6. Scene-by-Scene Script
 
-ก่อนเริ่ม Scene 1 ให้จัดจอแบบนี้
-
-1. Browser เปิดหน้า TodoApp และ login/ready แล้ว
-2. VS Code เปิด `src/phase2-final` และเรียง tab ตามลำดับที่จะใช้
-3. Terminal ขยาย font เรียบร้อยแล้ว
-4. Woodpecker UI login แล้ว
-5. Slide deck พร้อมกด next
-
-ลำดับ tab ใน VS Code ที่แนะนำ
-
-1. `.woodpecker.yml`
-2. `k8s/core-deployment.yaml`
-3. `k8s/postgres-statefulset.yaml`
-4. `k8s/ingress.yaml`
-5. `frontend/package.json`
-6. `frontend/__tests__/page.test.tsx`
-7. `document/phase2/reqchange.md`
-
----
-
-## 5. Detailed Scene-by-Scene Script
-
-## Scene 1 — เปิดคลิปและตั้งขอบเขตให้ชัด
+## Scene 1 — เปิดคลิปและล็อกขอบเขตให้ชัด
 
 ### เวลา
 
-0:00–0:40
+0:00–0:45
 
-### หน้าจอที่ต้องเปิด
+### บทพูดที่แนะนำ
 
-Slide หน้าปก
+> “คลิปนี้อธิบาย KPS-Enterprise Phase 2 Final ครับ โดย source of truth หลักที่เราจะยึดคือ `src/phase2-final` และ `.woodpecker/` เพราะสิ่งที่ต้องการสื่อคือ baseline ที่ active จริงในระบบ ไม่ใช่ baseline ระหว่างทาง”
 
-### สิ่งที่ต้องให้คนดูเห็น
+### สิ่งที่คนดูควรเห็น
 
 1. ชื่อโปรเจกต์
-2. คำว่า Phase 2
-3. ชื่อทีม
-4. คำว่า K3s + Woodpecker CI/CD
-
-### บทพูดที่แนะนำ
-
-> “คลิปนี้เป็นภาพรวมของ KPS-Enterprise Phase 2 ครับ โดยระบบปัจจุบันคือ TodoApp Big Calendar ที่ deploy บน K3s แบบ self-hosted และใช้ Woodpecker เป็น CI/CD หลัก”
-
-> “ในคลิปนี้เราจะยึด `src/phase2-final`, `document/phase2`, และ `implementation/phase2` เป็น source of truth เพื่ออธิบายทั้ง app, pipeline, deployment flow, และแนวคิด DevOpsSec ที่ใช้ในงานนี้”
-
-### หมายเหตุด้านภาพ
-
-1. อย่าอยู่หน้าปกนานเกิน 40 วินาที
-2. ชี้ด้วยเมาส์สั้น ๆ แค่ชื่อระบบและ Phase 2
+2. คำว่า Phase 2 Final
+3. K3s + Woodpecker CI/CD
 
 ---
 
-## Scene 2 — อธิบายภาพรวมโปรเจกต์และสิ่งที่เปลี่ยนจากอดีต
+## Scene 2 — อธิบายว่าระบบนี้คืออะไรและทำไม Phase 2 ถึงต่าง
 
 ### เวลา
 
-0:40–1:40
-
-### หน้าจอที่ต้องเปิด
-
-Slide project context หรือ overview
-
-### สิ่งที่ต้องให้คนดูเห็น
-
-1. ระบบนี้ไม่ใช่แค่ web app แต่เป็น full delivery system
-2. Phase 1 เคยเน้น Jenkins/EKS เป็นบริบทเก่า
-3. Phase 2 ย้าย baseline มาเป็น K3s + Woodpecker + TodoApp Big Calendar
+0:45–2:00
 
 ### บทพูดที่แนะนำ
 
-> “ถ้ามองจากมุมผู้ใช้ ระบบนี้คือ Todo application ที่ใช้ปฏิทินเป็นหน้าหลัก ผู้ใช้สามารถเปิดวันใดวันหนึ่งแล้วจัดการ todo ของวันนั้นได้ทันที”
+> “ถ้ามองจากผู้ใช้ ระบบนี้คือ TodoApp Big Calendar ที่ให้ผู้ใช้จัดการงานผ่านมุมมองแบบปฏิทิน แต่ถ้ามองจากมุมวิศวกรรม Phase 2 Final คือการทำให้เส้นทางส่งมอบซอฟต์แวร์ตั้งแต่ push, build, scan, deploy, canary, verify และ notify เชื่อมกันเป็น flow เดียว”
 
-> “แต่ถ้ามองจากมุม DevOps Phase 2 ไม่ได้จบที่หน้าเว็บครับ เราทำให้ทั้งการทดสอบ, การ build image, การ deploy, การ rollout verification และการแจ้งผล กลายเป็น flow ที่อัตโนมัติและตรวจสอบย้อนกลับได้”
-
-> “ดังนั้นเวลาเราพูดคำว่าระบบในคลิปนี้ เราหมายถึงทั้ง application path และ delivery path พร้อมกัน”
-
-### หมายเหตุด้านภาพ
-
-ถ้ามี slide เปรียบเทียบก่อน-หลัง ให้ชี้เฉพาะสิ่งที่ผู้ชมต้องจำ เช่น self-hosted K3s, Traefik ingress, Woodpecker pipeline, PostgreSQL backend
+> “ดังนั้นสิ่งที่เราจะโชว์ต่อจากนี้ไม่ใช่แค่หน้าเว็บ แต่คือระบบพิสูจน์ผลของการเปลี่ยนแปลงด้วย”
 
 ---
 
-## Scene 3 — โชว์แอปจริงให้เข้าใจ user-facing baseline
+## Scene 3 — โชว์หน้าแอปจริง
 
 ### เวลา
 
-1:40–3:10
+2:00–3:20
 
-### หน้าจอที่ต้องเปิด
+### สิ่งที่ต้องทำบนจอ
 
-Browser หน้า TodoApp Big Calendar
-
-### สิ่งที่ต้องทำให้เห็นบนจอ
-
-1. หน้า calendar แบบเต็มจอ
-2. stats bar ด้านบนหรือส่วนสรุปงาน
-3. คลิกวันหนึ่งวันให้เห็น side panel
-4. ถ้ามี task อยู่แล้ว ให้ชี้สี, priority, status
+1. เปิดหน้า Big Calendar
+2. คลิกวันที่หนึ่งวันให้เห็น day panel
+3. ชี้ stats หรือ colored pills ถ้ามีข้อมูลอยู่แล้ว
 
 ### บทพูดที่แนะนำ
 
-> “นี่คือ baseline ฝั่งผู้ใช้ครับ หน้าแรกเป็น Big Calendar ที่แสดง todo ตามวันจริง ไม่ใช่แค่ list ทั่วไป ผู้ใช้เห็นภาพรวมของเดือน และสามารถคลิกวันเพื่อเปิด panel ด้านข้างแล้วจัดการงานของวันนั้นได้”
+> “นี่คือปลายทางของทุก deploy ครับ คือหน้า Big Calendar ที่ผู้ใช้เห็นจริง เมื่อคลิกวันที่ก็เปิด panel เพื่อจัดการงานของวันนั้นได้ทันที”
 
-> “ประโยชน์ของ UI แบบนี้คือ user มองงานในเชิงเวลาได้ทันที เช่น งานวันนี้, งานค้าง, งานเสร็จแล้ว หรือ task ที่มี priority สูง”
-
-> “จุดที่ต้องจำไว้คือ ตอนเราพูดเรื่อง pipeline เราไม่ได้ build/deploy อะไรที่ลอยจากผู้ใช้ เพราะ output ปลายทางของ pipeline ก็คือหน้าจอนี้เอง”
-
-### การเคลื่อนหน้าจอ
-
-1. เลื่อนเมาส์ให้ช้า
-2. คลิกวันหนึ่งครั้งพอ
-3. ถ้าจะเพิ่ม task สั้น ๆ ก็ได้ แต่ไม่จำเป็นในคลิป overview
+> “จุดนี้สำคัญเพราะเวลาพูดเรื่อง pipeline เราไม่ได้พูดถึง process ลอย ๆ แต่พูดถึงสิ่งที่จะส่งผลกลับมาที่หน้าจอนี้”
 
 ---
 
-## Scene 4 — อธิบายสถาปัตยกรรมจากผู้ใช้ไปถึง data layer
+## Scene 4 — เชื่อมจาก UI ไปสู่ runtime architecture
 
 ### เวลา
 
-3:10–4:20
+3:20–4:50
 
-### หน้าจอที่ต้องเปิด
+### จอที่ต้องเปิด
 
-Slide architecture
-
-### สิ่งที่ต้องให้คนดูเห็น
-
-1. Browser → Traefik Ingress
-2. Frontend และ backend แยกกัน
-3. Backend คุยกับ PostgreSQL
-4. ทั้งหมดอยู่บน K3s
+1. Slide architecture
+2. `src/phase2-final/k8s/ingress.yaml`
+3. `src/phase2-final/k8s/traefik-routing.yaml`
+4. `src/phase2-final/k8s/postgres-statefulset.yaml`
 
 ### บทพูดที่แนะนำ
 
-> “request path ของระบบนี้เริ่มจาก browser ผ่านโดเมนเข้า Traefik ingress ซึ่งเป็น default ingress controller ของ K3s จากนั้น path ทั่วไปจะไป frontend ส่วน `/api`, `/healthz`, และ `/readyz` จะ route ไปที่ backend”
+> “runtime path ของระบบนี้เริ่มจาก public domain ผ่าน Traefik โดย path ทั่วไปไป frontend ส่วน `/api`, `/healthz`, และ `/readyz` ไป weighted backend route ที่เชื่อม stable กับ canary ผ่าน TraefikService”
 
-> “ฝั่ง backend เป็น Go service และ data layer ปัจจุบันใน cluster path ใช้ PostgreSQL StatefulSet ทำให้ backend สามารถรันหลาย replica และใช้ RollingUpdate ได้ง่ายกว่าแนว SQLite แบบ single writer”
+> “จุดนี้ทำให้ canary deploy ของเราเกิดขึ้นบน route จริง ไม่ใช่แค่ concept บนสไลด์”
 
-> “ดังนั้น deployment story ของ Phase 2 คือพยายามทำให้ runtime path ตรงกับแนวคิด availability, reproducibility และ update แบบควบคุมได้”
-
-### หมายเหตุด้านภาพ
-
-ถ้ามี diagram ให้ค้างประมาณ 10 วินาทีตอนอธิบาย path เพื่อให้คนดูจับ flow ทัน
+> “ฝั่งฐานข้อมูลเป็น PostgreSQL StatefulSet บน K3s พร้อม probes และ security settings ที่ชัดเจน ทำให้ data layer เป็นส่วนหนึ่งของ baseline ที่อธิบายได้”
 
 ---
 
-## Scene 5 — เปิด manifests จริงให้เห็นว่า architecture ไม่ได้มีแค่ใน slide
+## Scene 5 — เปิด pipeline source of truth และอธิบายเป็นกลุ่ม stage
 
 ### เวลา
 
-4:20–5:40
+4:50–7:20
 
-### หน้าจอที่ต้องเปิด
+### จอที่ต้องเปิด
 
-1. `src/phase2-final/k8s/core-deployment.yaml`
-2. `src/phase2-final/k8s/postgres-statefulset.yaml`
-3. `src/phase2-final/k8s/ingress.yaml`
+`.woodpecker/main-push.yml`
 
-### สิ่งที่ต้องชี้บนจอ
+### สิ่งที่ต้องชี้ให้เห็น
 
-1. backend `replicas: 2`
-2. `RollingUpdate`
-3. readiness/liveness probes
-4. PostgreSQL StatefulSet
-5. ingress route แยก `/api` และ `/healthz`/`/readyz`
+1. Stage 0-2: pre-flight, quality, integration
+2. Stage 3-5: build/push, sign/scan, DB ops
+3. Stage 6-8: canary deploy, canary analysis, promote/rollback
+4. Stage 9-10: smoke test, release tag, post-deploy analysis, email
 
 ### บทพูดที่แนะนำ
 
-> “ตรงนี้คือหลักฐานจาก manifest จริงครับ ไม่ใช่แค่สไลด์ เราจะเห็นว่า backend ถูกตั้งให้รัน 2 replicas และใช้ `RollingUpdate` เพื่อให้ rollout ใหม่ไม่ต้องดับทั้งระบบพร้อมกัน”
+> “Main push pipeline ของเราไม่ได้เป็นเส้นตรงแบบ test → build → deploy อย่างเดียว แต่เป็นชุดของ gates ที่ลดความเสี่ยงทีละชั้น”
 
-> “นอกจากนี้ยังมี readiness และ liveness probes ซึ่งสำคัญมากในมุม DevOps เพราะมันบอกทั้ง Kubernetes และ pipeline ว่า pod พร้อมรับ traffic จริงหรือยัง”
+> “ก่อน build เรามี Gitleaks, Hadolint, kube-score และ OPA จากนั้นจึงรัน quality-backend กับ quality-frontend แบบ parallel และค่อยต่อด้วย integration test กับ Postgres”
 
-> “ฝั่งฐานข้อมูล เราใช้ PostgreSQL แบบ StatefulSet เพื่อแยก data layer ออกจากตัว app ทำให้ deployment ของ backend ยืดหยุ่นขึ้น และสอดคล้องกับเป้าหมายการ scale และการ update ที่ควบคุมได้”
+> “หลัง build เรายังมี Cosign, SBOM, Trivy, database backup, migration test ก่อนถึงขั้น deploy ซึ่งทำให้ deployment path มีหลักฐานชัดว่าของที่ขึ้น production-like path ผ่านอะไรมาแล้วบ้าง”
 
-> “ส่วน ingress คือจุดที่ทำให้ frontend กับ backend อยู่ใต้โดเมนเดียวกัน แต่ยัง route traffic ไปคนละ service ได้อย่างเป็นระบบ”
-
-### หมายเหตุด้านภาพ
-
-1. เลื่อนเฉพาะจุดสำคัญ อย่าเลื่อนทั้งไฟล์เร็วเกินไป
-2. ถ้าต้องเลือกเพียงไฟล์เดียว ให้เลือก `core-deployment.yaml` ก่อน เพราะมี replicas, strategy และ probes ครบ
+> “ช่วง deploy เราใช้ canary 10% และวัดจาก Prometheus metrics ก่อนค่อย promote หรือ rollback ดังนั้นคำว่า deploy success ของเราไม่ได้มาจาก rollout status อย่างเดียว”
 
 ---
 
-## Scene 6 — เปิด pipeline baseline และอธิบาย feedback loop ของ CI/CD
+## Scene 6 — ยืนยัน runtime state บน cluster
 
 ### เวลา
 
-5:40–7:10
-
-### หน้าจอที่ต้องเปิด
-
-`src/phase2-final/.woodpecker.yml`
-
-### สิ่งที่ต้องชี้บนจอ
-
-1. `test-backend`
-2. `build-push-core`
-3. `build-push-web`
-4. `deploy-k3s`
-5. `notify-email`
-
-### บทพูดที่แนะนำ
-
-> “baseline pipeline ของ Phase 2 ปัจจุบันเริ่มจาก test-backend ก่อน เพื่อให้ backend ผ่าน unit and vet checks จากนั้น build และ push image ของ core กับ web ไป Docker Hub แล้วจึง deploy ไปยัง K3s ด้วย `kubectl`”
-
-> “หลัง deploy pipeline จะรอ rollout status ของ deployment ทั้งสองตัว และมี smoke test เบื้องต้นที่ยิง `/healthz` เพื่อเช็กว่าระบบตอบสนองได้จริง สุดท้ายจึงส่ง email notification กลับไปให้ทีม”
-
-> “นี่คือ feedback loop ที่สำคัญมาก เพราะหลัง `git push` ทีมไม่ต้องเดาสุ่มเองว่า deploy สำเร็จหรือไม่ แต่มี pipeline เป็นคนบอกอย่างเป็นระบบ”
-
-### ประโยคที่ต้องไม่ลืม
-
-> “ถ้าเราจะอธิบาย CI/CD ให้เข้าใจง่ายที่สุด ระบบนี้คือการแปลงคำว่า ‘เดิมต้องทำมือหลายขั้น’ ให้กลายเป็นคำสั่งเดียวคือ `git push` แล้วปล่อยให้ pipeline สร้าง feedback กลับมาเป็นลำดับ”
-
----
-
-## Scene 7 — โชว์ runtime evidence ผ่าน kubectl
-
-### เวลา
-
-7:10–8:20
-
-### หน้าจอที่ต้องเปิด
-
-Terminal
+7:20–8:30
 
 ### คำสั่งที่แนะนำ
 
 ```bash
 kubectl get pods -n todoapp
-kubectl get deploy -n todoapp
-kubectl get ingress -n todoapp
+kubectl get deploy,statefulset -n todoapp
+kubectl get ingress,ingressroute,traefikservice -n todoapp
 ```
 
-### สิ่งที่ต้องชี้บนจอ
-
-1. pod ของ web, core และ postgres
-2. deployment พร้อมใช้งาน
-3. ingress host
-
 ### บทพูดที่แนะนำ
 
-> “ตรงนี้คือ runtime evidence ที่ช่วยยืนยันว่าคำอธิบายใน slide และ YAML สะท้อนระบบที่ขึ้นจริงบน cluster ไม่ใช่เอกสารลอย ๆ”
+> “ตรงนี้คือหลักฐานว่าที่เล่าบนสไลด์กับ YAML สะท้อนระบบที่ขึ้นจริงอยู่บน cluster ไม่ใช่แค่เอกสารประกอบ”
 
-> “เวลาสอนหรือสาธิตเรื่อง CI/CD ผมคิดว่าสำคัญมากที่ต้องเชื่อม pipeline กับ runtime state ให้ได้ เพราะถ้าโชว์แต่ YAML โดยไม่โชว์ cluster คนฟังจะไม่เห็นปลายทางของ deployment จริง”
-
-### หมายเหตุด้านภาพ
-
-1. ถ้า output ยาว ให้ขยาย terminal font ล่วงหน้า
-2. อย่ารันคำสั่งเยอะเกินจนเสียเวลา
+> “การโชว์ cluster state ทำให้คนดูเชื่อมได้ว่าพูดถึง frontend, backend, PostgreSQL และ weighted route บนของจริง ไม่ใช่แค่แนวคิด”
 
 ---
 
-## Scene 8 — อธิบาย change request ที่เลือกและทำไมมันเหมาะกับวันเดโม
+## Scene 7 — เปิด Woodpecker UI และชี้ delivered improvements จาก graph จริง
 
 ### เวลา
 
-8:20–9:40
-
-### หน้าจอที่ต้องเปิด
-
-1. `document/phase2/reqchange.md`
-2. `src/phase2-final/frontend/package.json`
-3. `src/phase2-final/frontend/__tests__/page.test.tsx`
+8:30–10:30
 
 ### สิ่งที่ต้องชี้บนจอ
 
-1. requirement ที่เลือกคือ frontend quality gate
-2. scripts `type-check` และ `test:ci`
-3. หลักฐานว่ามี frontend tests อยู่จริง
+1. `quality-frontend` มีอยู่จริงใน Stage 1
+2. `sign-and-scan` มีอยู่จริง
+3. `canary-analyze` และ `auto-rollback` เป็น path ที่แยกชัด
+4. `smoke-test`, `k6-load-test`, `dast-zap`, `email-*` อยู่ช่วงท้าย
 
 ### บทพูดที่แนะนำ
 
-> “change request ที่เราเลือกใช้ในวันเดโมสดคือเพิ่ม frontend quality gate ใน Woodpecker pipeline ให้ frontend ต้องผ่าน `npm run type-check` และ `npm run test:ci` ก่อนถึงขั้น build web image”
+> “ตรงนี้คือหัวใจของคลิปครับ เพราะมันทำให้ delivered improvements กลายเป็นสิ่งที่ชี้ได้บน graph จริง”
 
-> “เหตุผลที่เลือก change นี้เพราะมันตรงโจทย์ small, safe, observable มากที่สุด เราแตะไฟล์เดียวคือ pipeline config, ไม่แตะ production secret, ไม่แตะ database, และ observable result ชัดมากใน Woodpecker UI”
+> “สิ่งที่ควรจำคือ Stage 0-5 ลดความเสี่ยงก่อน deploy, Stage 6-8 คุมความเสี่ยงระหว่าง deploy, และ Stage 9-10 ยืนยันผลหลัง deploy พร้อมแจ้งทีม”
 
-> “ที่สำคัญคือมันไม่ใช่ requirement ที่คิดลอย ๆ เพราะใน repo มีทั้ง script และ tests อยู่แล้ว ดังนั้นการเปลี่ยนนี้คือการยกระดับ quality gate จากของที่มีอยู่ให้เข้าไปอยู่ใน feedback loop จริง”
+### ถ้าจะเปิด log
 
-### หมายเหตุด้านภาพ
+เลือกอย่างใดอย่างหนึ่ง
 
-1. เลื่อน `package.json` ให้เห็น scripts ชัด ๆ
-2. เลื่อน test file ให้เห็นชื่อ test ที่ผูกกับ calendar behavior สัก 2–3 อัน
+1. `quality-frontend` เพื่อยืนยัน type-check และ Jest
+2. `sign-and-scan` เพื่อยืนยัน Cosign/SBOM/Trivy
+3. `canary-analyze` เพื่อยืนยัน 160 requests และ metric thresholds
 
 ---
 
-## Scene 9 — อธิบาย DevOpsSec แบบผูกกับของจริง ไม่ใช่คำสวย ๆ
+## Scene 8 — ปิด feedback loop ด้วย monitoring / email / docs evidence
 
 ### เวลา
 
-9:40–11:10
+10:30–11:40
 
-### หน้าจอที่ต้องเปิด
+### สิ่งที่ต้องเปิด
 
-Slide DevOpsSec หรือเอกสาร `presentation/final-phase2/devopssec-supplement.md`
-
-### แกนที่ต้องพูด
-
-1. secret management
-2. deployment safety
-3. container hardening
-4. pipeline quality gates
-5. future hardening ที่ควรเสริม
+1. Grafana หรือ monitoring manifest อย่างน้อยหนึ่งจุด
+2. email success/rollback/failure screenshot หรือ UI evidence
+3. ถ้ามีเวลา เปิด `document/phase2/report.md` ช่วง summary ที่สรุป improvements
 
 ### บทพูดที่แนะนำ
 
-> “สำหรับโปรเจกต์นี้คำว่า DevOpsSec ไม่ได้หมายถึงแค่เพิ่ม scanner เข้าไปหนึ่งตัว แต่หมายถึงการฝังมุมความปลอดภัยและความน่าเชื่อถือไว้ในทุกช่วงของ delivery flow”
-
-> “ของที่มีอยู่แล้วใน baseline ปัจจุบัน เช่น การใช้ secret ผ่าน pipeline และ Kubernetes, การไม่ hardcode credential ใน repo, การใช้ readiness/liveness probe, การใช้ non-root security context, และการรอ rollout status ก่อนถือว่า deploy สำเร็จ”
-
-> “ส่วนของที่ควรต่อยอดทันทีถ้ามีเวลามากขึ้นคือ Trivy scan, SBOM, image signing ด้วย Cosign, policy check, monitoring/logging, และ backup/restore flow ที่เป็นระบบ”
-
-### หมายเหตุด้านภาพ
-
-ถ้ามีเวลา ให้ชี้ว่าใน repo root มี pattern ขั้นสูงกว่าเรื่อง Cosign/SBOM อยู่แล้ว แต่ source of truth สำหรับ Phase 2 เดิมยังเป็น `src/phase2-final/.woodpecker.yml`
+> “ระบบนี้ไม่ควรจบที่ deploy ผ่านครับ แต่ต้องรู้ผลเร็ว รู้สถานะเร็ว และตรวจย้อนกลับได้ ดังนั้น monitoring กับ notification จึงเป็นส่วนหนึ่งของ baseline ไม่ใช่ของตกแต่ง” 
 
 ---
 
-## Scene 10 — สรุปให้คนดูรู้ว่ากลุ่มถัดไปควรเริ่มจากตรงไหน
+## Scene 9 — อธิบาย DevOpsSec แบบซื่อสัตย์
 
 ### เวลา
 
-11:10–12:30
-
-### หน้าจอที่ต้องเปิด
-
-Slide recap หรือ closing
-
-### สิ่งที่ต้องพูดให้ครบ
-
-1. baseline application
-2. baseline deployment path
-3. baseline pipeline flow
-4. selected live change
-5. สิ่งที่กลุ่มถัดไปไม่ต้องเล่าซ้ำ
+11:40–12:40
 
 ### บทพูดที่แนะนำ
 
-> “สรุป Phase 2 ของเรา ระบบนี้คือ TodoApp Big Calendar ที่ deploy บน K3s ผ่าน Traefik, backend คุยกับ PostgreSQL, และใช้ Woodpecker pipeline ทำ test, build, push, deploy, rollout verification และ notification แบบอัตโนมัติ”
+> “DevOpsSec ในโปรเจกต์นี้หมายถึงการเอาเรื่องความปลอดภัยและความน่าเชื่อถือเข้าไปอยู่ในหลายจุดของ flow แล้ว ซึ่งของที่ active จริงมีทั้ง secret hygiene, lint/policy gates, signed and scanned images, canary rollout, runtime hardening, monitoring และ notification”
 
-> “สำหรับวันเดโมสด เราจะใช้ baseline นี้เป็นจุดตั้งต้น แล้วทำ change แบบ small-safe-observable โดยเลือกเพิ่ม frontend quality gate เพื่อ reinforce feedback loop ของ pipeline”
-
-> “ดังนั้นถ้ากลุ่มถัดไปจะอธิบายงานต่อ เขาสามารถ assume baseline นี้ได้เลย แล้วค่อยเล่าเฉพาะส่วนที่ตนเองแก้ต่างหรือเสริม เช่น security, config, failure handling, deployment strategy หรือ monitoring”
-
-> “นี่คือเหตุผลว่าทำไมเราไม่ได้เล่าแค่ฟีเจอร์ของแอป แต่เล่าทั้งระบบส่งมอบ เพราะสิ่งที่อยากให้ผู้ฟังเข้าใจไม่ใช่แค่ app ทำอะไรได้ แต่คือ app ถูกส่งมอบและควบคุมคุณภาพอย่างไร”
+> “ส่วนสิ่งที่ยังควรต่อยอดคือ signature verification ก่อน promote, secret rotation, restore drill, log aggregation และ alert tuning ซึ่งควรแยกเป็น next step อย่างตรงไปตรงมา”
 
 ---
 
-## 6. ถ้าจะทำเวอร์ชันคลิปยาว 15 นาที ให้เพิ่ม 2 scene นี้
-
-## Scene 11 — Q&A simulation
+## Scene 10 — ปิดคลิปและบอก baseline ที่ส่งต่อได้
 
 ### เวลา
 
-12:30–13:40
-
-### ประเด็นที่แนะนำ
-
-1. ทำไมเลือก Woodpecker แทน Jenkins ใน Phase 2
-2. ถ้า pipeline fail จะรู้ root cause ยังไง
-3. ถ้าต้อง rollback ทำอะไรบ้าง
-
-### ประโยคสั้นที่ใช้ได้
-
-> “Woodpecker ตรงกับ self-hosted K3s pipeline ที่เรียบง่ายกว่าและตั้งต้นได้เร็วกว่า Jenkins ในบริบทนี้”
-
-> “ถ้า pipeline fail เราไม่มองว่าเป็นเรื่องแย่โดยอัตโนมัติ แต่ดูว่า fail เร็วพอไหมและหยุดก่อนของไม่ดีจะไปถึง production ได้หรือไม่”
-
----
-
-## Scene 12 — Risk and Improvement Discussion
-
-### เวลา
-
-13:40–15:00
-
-### ประเด็นที่แนะนำ
-
-1. security scan ยังควรเพิ่มใน active pipeline
-2. config drift ต้องลด
-3. monitoring/logging ควรถูกยกขึ้นเป็นส่วนหนึ่งของ operational baseline
-4. backup และ restore ของ PostgreSQL ควรมี runbook และการทดสอบจริง
+12:40–13:20
 
 ### บทพูดที่แนะนำ
 
-> “จุดที่ยังพัฒนาได้ต่อมีอยู่ชัดเจนครับ เช่น security gate เชิงลึก, config drift cleanup ระหว่าง manifest กับ deploy step, และ operational observability ที่ทำให้ทีมไม่เพียง deploy ได้ แต่ operate ได้อย่างมั่นใจต่อเนื่อง”
+> “สิ่งที่ Phase 2 Final ส่งต่อให้กลุ่มถัดไปไม่ใช่แค่ app ที่เปิดได้ แต่คือ baseline ที่มี runtime path, pipeline path, canary path, verification path และ evidence path ครบในระดับที่อ้างต่อได้ทันที”
+
+> “ดังนั้นรอบถัดไปควรเล่าเฉพาะสิ่งที่เปลี่ยนจาก baseline นี้ ไม่จำเป็นต้องย้อนเล่า architecture และ pipeline ใหม่ทั้งหมด”
 
 ---
 
-## 7. Checklist สิ่งที่ต้องโชว์ให้ครบในคลิป
+## 7. ถ้าจะทำเวอร์ชันยาว 15 นาที ให้เพิ่ม 2 ส่วนนี้
+
+1. Q&A simulation เรื่อง “ถ้า canary fail จะเกิดอะไรขึ้น”
+2. Honest next steps เรื่อง signature verification, restore drill, logs และ alert tuning
+
+---
+
+## 8. Checklist สิ่งที่ต้องมีในคลิป
 
 1. หน้าแอปจริง
-2. อย่างน้อย 1 manifest ที่มี replicas และ probes
-3. อย่างน้อย 1 ส่วนของ `.woodpecker.yml`
-4. output จาก `kubectl get pods -n todoapp`
-5. เอกสาร change request หรือ source ของ live change
-6. แนวคิด DevOpsSec ที่พูดจากของจริง ไม่ใช่ลอย ๆ
+2. อย่างน้อย 1 manifest ฝั่ง route และ 1 manifest ฝั่ง database
+3. `.woodpecker/main-push.yml`
+4. `kubectl` output จาก cluster จริง
+5. Woodpecker graph หรือ run evidence จริง
+6. monitoring หรือ email evidence อย่างน้อย 1 ชิ้น
+7. closing statement ที่บอกชัดว่า baseline นี้ส่งต่อได้
 
 ---
 
-## 8. เทคนิคการอัดให้ดูมืออาชีพขึ้น
+## 9. Mini Teleprompter Version
 
-1. ใช้ zoom หน้าจอ 125–135% เพื่อให้อ่าน YAML และ terminal ง่าย
-2. เวลาสลับจาก slide ไป code ให้หยุด 1 วินาทีก่อนเริ่มพูดหัวข้อใหม่
-3. อย่า scroll ไฟล์ระหว่างพูดประโยคสำคัญ เพราะคนดูจะอ่านไม่ทัน
-4. ถ้าต้องรอ pipeline หรือ network ให้ตัดต่อได้ แต่อย่าตัด logic ของ flow ออก
-5. ถ้าต้องใช้ screenshot ของ Woodpecker run ให้พูดตรง ๆ ว่าเป็น evidence จาก run ล่าสุด ไม่ควรทำเหมือนกำลังเกิด realtime ถ้าไม่ใช่จริง
-
----
-
-## 9. ประโยคปิดคลิปที่แนะนำ
-
-> “ภาพรวมของ Phase 2 คือเราไม่ได้สร้างแค่ Todo application แต่สร้างระบบส่งมอบที่มี baseline ชัด, deploy path ชัด, feedback loop ชัด และพร้อมรับ change แบบเล็ก ปลอดภัย และตรวจสอบได้ผ่าน pipeline จริง ขอบคุณครับ”
-
----
-
-## 9.1 Mini Teleprompter Version
-
-ถ้าต้องอัดแบบเกือบอ่านตามได้เลย ให้ยึด 10 บรรทัดนี้
-
-1. “คลิปนี้อธิบาย KPS-Enterprise Phase 2 โดยยึด Phase 2 เป็น source of truth หลัก”
-2. “ระบบนี้มีทั้งมุมผู้ใช้และมุม delivery flow อยู่พร้อมกัน”
-3. “หน้า Big Calendar คือปลายทางที่ทุก deploy ต้องส่งผลกลับมาให้เห็น”
-4. “runtime path คือ Browser ผ่าน Traefik ไป frontend และ backend ที่คุยกับ PostgreSQL”
-5. “manifest จริงยืนยันเรื่อง replicas, RollingUpdate, probes และ ingress routing”
-6. “Woodpecker pipeline คือ feedback loop หลัง `git push`”
-7. “cluster state ยืนยันว่า baseline นี้ขึ้นจริง ไม่ได้อยู่แค่ในเอกสาร”
-8. “live change ที่เลือกคือเพิ่ม frontend quality gate ก่อน build web image”
-9. “DevOpsSec ของระบบนี้มี baseline แล้ว แต่ยังควรเสริม security gate, supply chain trust และ observability”
-10. “สิ่งที่กลุ่มถัดไปควรรับช่วงต่อคือ baseline นี้ แล้วเล่าเฉพาะสิ่งที่ตัวเองต่อยอด”
+1. “คลิปนี้อธิบาย Phase 2 Final โดยยึด `src/phase2-final` และ `.woodpecker/` เป็น source of truth”
+2. “ปลายทางของทุก deploy คือหน้า TodoApp Big Calendar ที่ผู้ใช้เห็นจริง”
+3. “runtime path ใช้ Traefik แยก frontend route กับ weighted backend route ไป PostgreSQL”
+4. “main push pipeline ไม่ใช่แค่ test-build-deploy แต่เป็นชุดของ gates ตั้งแต่ pre-flight ถึง notification”
+5. “delivered improvements สำคัญคือ quality gates, sign/scan, canary analysis, smoke test, monitoring และ email”
+6. “หลักฐานสำคัญต้องดูทั้ง YAML, cluster state, pipeline graph และ notification”
+7. “DevOpsSec ของระบบนี้มีของจริงแล้ว และยังมี next steps ที่พูดได้อย่างซื่อสัตย์”
+8. “baseline นี้คือสิ่งที่กลุ่มถัดไปควร assume ได้เลย”

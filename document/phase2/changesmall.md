@@ -3,6 +3,18 @@
 > **เอกสารนี้:** บันทึก small changes (การแก้ไขเล็ก ๆ น้อย ๆ) ที่เกิดขึ้นหลัง pipeline หลักถูกสร้างขึ้นมาแล้ว  
 > แต่ละ change มีบริบท สาเหตุ วิธีแก้ และบทเรียนที่ได้รับ
 
+> **วิธีใช้ในวันเดโม:** ถ้าต้องการยกตัวอย่างว่า Phase 2 Final ไม่ได้มีแค่ big-picture improvement แต่ยังมีงานเก็บรายละเอียดที่ทำให้ระบบนิ่งขึ้น ให้เลือกหยิบจากไฟล์นี้ 2-3 ข้อที่มีหลักฐานชัดและผูกกับ runtime/pipeline จริง
+
+## จุดที่แนะนำให้หยิบไปเล่า
+
+| Change | ทำไมควรเล่า | สิ่งที่ควรโชว์ |
+|---|---|---|
+| Canary pod label fix | อธิบายว่า canary + NetworkPolicy ต้องไปด้วยกัน | `traefik-weighted.yaml` และผล 0/40 error |
+| PHP `%%` escape ใน email | อธิบายว่า notification path ก็มีรายละเอียดที่ต้อง harden | email evidence / template snippet |
+| k6 load test | ช่วยแสดงว่า post-deploy analysis ไม่ได้มีแค่ smoke test | `k6-load-test` result |
+| AlertmanagerConfig | เชื่อมกับ observability และ notification story | monitoring manifests |
+| DAST ZAP baseline | ช่วยเสริม DevOpsSec ว่ามี runtime scan หลัง deploy | `dast-zap` step |
+
 ---
 
 ## สารบัญ

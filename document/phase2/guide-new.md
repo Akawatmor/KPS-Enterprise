@@ -1,5 +1,7 @@
 # 📘 Complete Guide: KPS-Enterprise on K3s Self-Hosted + Woodpecker CI
 
+> **Alignment note for Phase 2 Final:** เอกสารนี้เป็นคู่มือ setup แบบละเอียดที่มีคุณค่าในเชิงติดตั้ง แต่ baseline ที่ active จริงของ Phase 2 Final ให้ยึด `src/phase2-final/`, `.woodpecker/main-push.yml`, `document/phase2/report.md` และ `document/phase2/add-pipeline.md` เป็นหลัก โดย pipeline ปัจจุบันใช้ไฟล์แบบ split ใน `.woodpecker/` ไม่ใช่ root `.woodpecker.yml`
+
 > **สถานะ**: เปลี่ยนจาก AWS EKS → K3s Self-Hosted บน Proxmox VMs  
 > **CI/CD**: เปลี่ยนจาก Jenkins → Woodpecker CI  
 > **App**: Todo App (Go + Next.js + SQLite)

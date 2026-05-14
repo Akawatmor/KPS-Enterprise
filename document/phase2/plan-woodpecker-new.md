@@ -1,5 +1,7 @@
 # 🛠️ Step-by-Step: ติดตั้ง K3s Cluster ทำมือ ละเอียดทุกขั้นตอน
 
+> **Alignment note for Phase 2 Final:** ไฟล์นี้เป็นแผน/คู่มือเชิงปฏิบัติการสำหรับสร้าง cluster แบบทำมือ แต่ source of truth ที่ใช้พูดใน Final Demo ควรยึด `src/phase2-final/`, `.woodpecker/main-push.yml` และเอกสารใน `document/phase2/` ที่อัปเดตแล้วเป็นหลัก
+
 ## 📋 สิ่งที่จะได้ตอนจบ
 
 ```

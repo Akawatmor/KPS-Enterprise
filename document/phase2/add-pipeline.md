@@ -1,253 +1,201 @@
-# 🚀 แผนปรับปรุง Pipeline ให้ว้าวขึ้น
+# Pipeline Improvement Status — Phase 2 Final
 
-> **เอกสารนี้คือ:** รายการสิ่งที่ควรเพิ่ม/เปลี่ยน จาก Pipeline เดิม เพื่อให้ดูเป็น production-grade มากขึ้น
-
-> **✅ = ดำเนินการแล้ว | ⚠️ = บางส่วน | ⏳ = ยังไม่ได้ทำ**
+> เอกสารนี้สรุปว่า Phase 2 Final “เพิ่มอะไรเข้า pipeline แล้วบ้าง”, “หลักฐานอยู่ตรงไหน”, และ “ควรโชว์อะไรในวันนำเสนอ” เพื่อไม่ให้สับสนระหว่างของที่ทำเสร็จแล้วกับของที่ยังเป็น next step
 
 ---
 
-## 1. ✅ เปลี่ยน SQLite → PostgreSQL (ดำเนินการแล้ว)
+## 1. ภาพรวมของ main push pipeline ปัจจุบัน
 
-**ปัญหาของ SQLite ใน Pipeline ปัจจุบัน:**
-```
-SQLite = single writer → PVC = ReadWriteOnce
-→ backend ได้แค่ 1 replica
-→ deploy strategy ต้องเป็น Recreate (มี downtime 5 วินาที)
-→ backup = copy file ทั้งก้อน (ไม่ granular)
-```
+active production pipeline ของ Phase 2 อยู่ที่ `.woodpecker/main-push.yml` และมี logic แบบ 12-stage ดังนี้
 
-**เปลี่ยนแล้วได้อะไร:**
-```
-PostgreSQL แยก pod (StatefulSet + iSCSI PVC)
-→ backend scale เป็น 2+ replicas ได้
-→ strategy กลับเป็น RollingUpdate (zero downtime)
-→ backup ด้วย pg_dump (restore ระดับ table/row ได้)
-→ data อยู่บน Synology NAS (hardware RAID)
-```
+1. Stage 0: Pre-flight checks
+2. Stage 1: Quality gates
+3. Stage 2: Integration test
+4. Stage 3: Build & Push
+5. Stage 4: Sign & Scan
+6. Stage 5: DB Operations
+7. Stage 6: Canary Deploy + Monitoring Sync
+8. Stage 7: Canary Analysis
+9. Stage 8: Promote / Auto-Rollback
+10. Stage 9: Smoke Test + Release Tag
+11. Stage 9b: k6 + ZAP
+12. Stage 10: Email Notifications
 
-**สิ่งที่ต้องทำ:**
-```
-1. สร้าง K8s Secret เก็บ DB credentials + connection string
-2. สร้าง PostgreSQL StatefulSet + Headless Service
-   - image: postgres:16-alpine
-   - mount iSCSI PVC ที่มีอยู่แล้ว
-   - probe: pg_isready
-3. แก้ Go backend
-   - เปลี่ยน driver: sqlite → lib/pq
-   - เปลี่ยน placeholder: ? → $1, $2
-   - อ่าน DSN จาก env (DATABASE_DSN) แทน file path
-4. แก้ deployment.yaml
-   - replicas: 1 → 2
-   - strategy: Recreate → RollingUpdate
-   - เพิ่ม env DATABASE_DSN from secret
-   - ลบ PVC mount ออกจาก backend pod
-5. Migrate data
-   - sqlite3 .dump → แปลง syntax → psql import
-6. ทดสอบว่า /readyz ping DB ได้
-```
+ดังนั้นเวลาพูดหน้าห้อง ไม่ควรสรุปสั้นเกินไปว่า pipeline มีแค่ test → build → deploy → email
 
 ---
 
-## 2. ✅ เพิ่ม Trivy Security Scan ใน Pipeline (ดำเนินการแล้ว)
+## 2. Improvement Matrix: ทำแล้วอะไรบ้าง
 
-> `sign-and-scan` step (Stage 4): Trivy scan HIGH/CRITICAL block + Cosign image sign + SBOM CycloneDX
-> ส่วน secret scan ใช้ Gitleaks (Stage 0) + gosec/govulncheck (Stage 1)
-
-```
-build image → push → deploy เลย
-→ ไม่รู้ว่า image มี CVE ร้ายแรงหรือเปล่า
-```
-
-**เพิ่มแล้วได้อะไร:**
-```
-build image → Trivy scan → CRITICAL พบ? → ❌ block deploy (production ปลอดภัย)
-                         → ไม่พบ?       → ✅ deploy ต่อ
-
-= "Security Gate" ใน pipeline
-= shift-left security — จับ vulnerability ก่อนถึง production
-```
-
-**สิ่งที่ต้องทำ:**
-```
-1. เพิ่ม step ใน .woodpecker.yml หลัง build-push
-   - image: aquasec/trivy
-   - scan image ที่เพิ่ง push
-   - --exit-code 1 --severity CRITICAL → fail pipeline ถ้าเจอ
-   - --exit-code 0 --severity HIGH → report แต่ไม่ block
-2. scan ทั้ง backend + frontend image (parallel ได้)
-3. depends_on: build-push-core / build-push-web
-```
+| Improvement | สถานะ | อยู่ตรงไหน | สิ่งที่ควรโชว์ |
+|---|---|---|---|
+| Pre-flight policy/security checks | ทำแล้ว | Stage 0 | `secret-scan`, `dockerfile-lint`, `k8s-lint`, `opa-policy` |
+| Frontend + backend quality gates | ทำแล้ว | Stage 1 | `quality-backend`, `quality-frontend` |
+| Integration test กับ Postgres | ทำแล้ว | Stage 2 | `integration-test` |
+| Immutable image tags | ทำแล้ว | Stage 3 | image tag จาก commit SHA |
+| Cosign + SBOM + Trivy | ทำแล้ว | Stage 4 | `sign-and-scan` log |
+| pg_dump backup + migration test | ทำแล้ว | Stage 5 | `db-prep`, `migration-test` |
+| Canary deploy 10% + metric analysis | ทำแล้ว | Stage 6-7 | `canary-deploy`, `canary-analyze` |
+| Promote / auto-rollback | ทำแล้ว | Stage 8 | `promote-stable`, `auto-rollback` |
+| Public smoke test + release tag | ทำแล้ว | Stage 9 | `smoke-test`, `create-release-tag` |
+| k6 load test + ZAP baseline | ทำแล้ว | Stage 9b | `k6-load-test`, `dast-zap` |
+| HTML email notification | ทำแล้ว | Stage 10 | `email-success`, `email-rollback`, `email-failure` |
+| Restore drill / retention policy | ยังไม่ครบ | Outside main push | อธิบายเป็น next step |
+| Signature verification ก่อน promote | ยังไม่ครบ | Outside main push | อธิบายเป็น next step |
 
 ---
 
-## 3. ✅ เพิ่ม Smoke Test หลัง Deploy (ดำเนินการแล้ว)
+## 3. จุดปรับปรุงสำคัญที่ควรเล่าอย่างละเอียด
 
-> `smoke-test` step (Stage 9): curl /healthz ผ่าน Traefik IP, public backend, public frontend
-> ยิ่งไปกว่านั้นมี canary analysis (Stage 7) พิสูจน์ว่า canary pod สุขภาพดีก่อน promote 100%%
+## 3.1 Frontend Quality Gate
 
-```
-deploy เสร็จ → จบ pipeline → หวังว่าใช้ได้
-→ pod อาจ Running แต่ API return 500 ก็ได้
-```
+### สิ่งที่เปลี่ยน
 
-**เพิ่มแล้วได้อะไร:**
-```
-deploy เสร็จ → curl /healthz → POST /api/todos → GET → DELETE
-→ พิสูจน์ว่า app ทำงานได้จริงบน production
-→ ถ้า fail = email แจ้งทันที + rollback ได้เลย
-```
+1. จากเดิม pipeline ตรวจฝั่ง backend เป็นหลัก
+2. ตอนนี้ `quality-frontend` เป็นส่วนหนึ่งของ baseline แล้ว
+3. pipeline บังคับ `npm ci`, `type-check` และ Jest coverage path จริงก่อนเดินต่อ
 
-**สิ่งที่ต้องทำ:**
-```
-1. เพิ่ม step ใน .woodpecker.yml หลัง deploy-k3s
-   - image: bitnami/kubectl (มี curl ด้วย) หรือ curlimages/curl
-   - kubectl run --rm pod ชั่วคราวใน cluster
-   - curl ยิง 5 requests:
-     a. GET  /healthz         → expect 200
-     b. GET  /readyz          → expect 200
-     c. POST /api/todos       → expect 201 → จำ id
-     d. GET  /api/todos/:id   → expect 200
-     e. DELETE /api/todos/:id → expect 200
-   - ถ้า step ไหน fail → exit 1 → pipeline fail
-2. depends_on: deploy-k3s
-```
+### ทำไมสำคัญ
+
+1. ลด blind spot ฝั่ง UI
+2. ทำให้ feedback loop ฝั่ง frontend เกิดก่อน build/deploy
+3. เป็นตัวอย่าง change ที่ small, safe, observable และตอนนี้ active อยู่จริง
+
+### สิ่งที่ควรโชว์
+
+1. `.woodpecker/main-push.yml` ตรง Stage 1
+2. `frontend/package.json`
+3. Woodpecker run ล่าสุดที่ผ่าน `quality-frontend`
 
 ---
 
-## 4. ✅ ปรับ Email Notification ให้เป็น HTML สวย (ดำเนินการแล้ว)
+## 3.2 Sign & Scan หลัง Build
 
-> `email-success`, `email-rollback`, `email-failure` step (Stage 10)
-> ใช้ `deblan/woodpecker-email:latest` + PHP heredoc HTML + ปุ่ม 3 สี (pipeline, production, monitoring)
-> subject แสดง ✅/🚨/❌ + repo@SHA ชัดเจน
+### สิ่งที่เปลี่ยน
 
-```
-plain text → "Deploy สำเร็จ" → ดูธรรมดา
-```
+1. image ไม่ได้ถูก build แล้วปล่อย deploy ทันที
+2. main push pipeline ทำ Cosign signing, SBOM generation และ Trivy scan ก่อนถึง DB ops และ deploy
 
-**ปรับแล้วได้อะไร:**
-```
-HTML email → มี table แสดง commit/branch/author/duration
-→ มี pipeline status: test ✅ → build ✅ → scan ✅ → deploy ✅ → smoke ✅
-→ มี link ไป Woodpecker UI + Production URL
-→ forward ให้อาจารย์/ทีมดูได้ทันที — ดู professional
-```
+### ทำไมสำคัญ
 
-**สิ่งที่ต้องทำ:**
-```
-1. ใช้ drillster/drone-email plugin
-2. Setup Gmail App Password → เก็บใน Woodpecker Secrets
-   - SMTP_USERNAME, SMTP_PASSWORD
-3. สร้าง 2 steps:
-   a. email-success (when: status: success)
-      - subject มี commit SHA + branch
-      - body เป็น HTML table: repo, branch, commit, author, duration, images
-      - แสดง pipeline flow: test ✅ → build ✅ → scan ✅ → deploy ✅ → smoke ✅
-      - link ไป pipeline log + production URL
-   b. email-failure (when: status: failure)
-      - subject บอก FAILED + commit SHA
-      - body บอก step ที่ fail
-      - เน้นว่า "Production ยังใช้ version เดิม — ไม่มีผลกระทบ"
-```
+1. เพิ่ม traceability และ trust ของ artifact
+2. ช่วยสื่อว่าระบบไม่ได้วัดแค่ functional correctness แต่ดู artifact risk ด้วย
+
+### สิ่งที่ควรโชว์
+
+1. Stage `sign-and-scan`
+2. image tag จาก commit SHA
+3. ถ้ามีเวลา ชี้คำว่า Cosign/SBOM/Trivy ใน log
 
 ---
 
-## 5. ⚠️ PostgreSQL Backup CronJob (บางส่วน)
+## 3.3 Database Safety ก่อน Deploy
 
-> `db-prep` step ใน pipeline สร้าง pg_dump snapshot ก่อนทุก deploy
-> ยังไม่มี: CronJob สำหรับ daily backup + retention policy — ยังเป็น manual
+### สิ่งที่เปลี่ยน
 
-**ตอนนี้:**
-```
-SQLite backup = kubectl cp file ออกมา (manual)
-→ ลืมทำ = ข้อมูลหาย
-```
+1. มี `pg_dump` snapshot ก่อน deploy
+2. มี migration test path แยกก่อนถึง canary
+3. production cluster ใช้ PostgreSQL StatefulSet เป็น baseline
 
-**เพิ่มแล้วได้อะไร:**
-```
-CronJob ทุกคืน ตี 2 → pg_dump → gzip → เก็บบน host
-→ retention 7 วัน (ลบเก่าอัตโนมัติ)
-→ restore ได้ระดับ table/row
-→ เป็น Layer 1 backup, Synology Snapshot เป็น Layer 2
-```
+### ทำไมสำคัญ
 
-**สิ่งที่ต้องทำ:**
-```
-1. สร้าง CronJob YAML ใน k8s/
-   - schedule: "0 2 * * *"
-   - image: postgres:16-alpine
-   - command: pg_dump → gzip → /backup/todoapp-$(date).sql.gz
-   - mount hostPath /var/backups/postgres
-   - env PGPASSWORD from secret
-2. เพิ่ม cleanup command: find /backup -mtime +7 -delete
-3. kubectl apply ใน deploy step ของ pipeline
-```
+1. ช่วยให้ Phase 2 Final ไม่ได้เล่าแค่ app path แต่เล่า data safety ด้วย
+2. ทำให้ deployment story มีมิติของ recoverability มากขึ้น
+
+### สิ่งที่ควรโชว์
+
+1. Stage `db-prep`
+2. Stage `migration-test`
+3. `postgres-statefulset.yaml`
 
 ---
 
-## 6. ✅ ปรับ Pipeline Flow เป็น 10 Stages (ดำเนินการแล้ว)
+## 3.4 Canary Deploy + Analysis
 
-> Pipeline ปัจจุบันมี Stage 0-10 + 9b: pre-flight → quality gates (parallel) → integration → build (parallel) → security scan → DB ops (parallel) → canary deploy → canary analysis → promote/auto-rollback → smoke+release-tag → k6+ZAP → email
+### สิ่งที่เปลี่ยน
 
-**ตอนนี้:**
-```
-test → build → deploy → email (4 stages)
-```
+1. backend ไม่ถูกปล่อย 100% ทันที
+2. ระบบใช้ weighted route 90/10 ระหว่าง analysis
+3. วัดผลจาก 160 requests และ Prometheus metrics ก่อน promote
 
-**ปรับแล้ว:**
-```
-test → build (parallel) → scan (parallel) → deploy → smoke test → email (7 stages)
-      ├─ core ──────────── ├─ core
-      └─ web  ──────────── └─ web
+### ทำไมสำคัญ
 
-จุดว้าว:
-- parallel build ทั้ง 2 images พร้อมกัน (เร็วขึ้น)
-- parallel scan ทั้ง 2 images พร้อมกัน
-- 3 quality gates: code → security → runtime
-- ทุก gate ต้องผ่าน → ถึงจะถึง production
-```
+1. ลด blast radius ของ release
+2. ช่วยให้คำว่า rollback มี path ที่ตรวจสอบได้จริง
+3. เป็น highlight ที่ควรพูดให้ชัดที่สุดในวันเดโม
 
-**สิ่งที่ต้องทำ:**
-```
-1. แยก build-push เป็น 2 steps: build-push-core + build-push-web
-   - depends_on: test-backend
-   - (Woodpecker รัน parallel อัตโนมัติเมื่อ depends_on เหมือนกัน)
-2. เพิ่ม scan-core + scan-web
-   - depends_on: build-push-core / build-push-web ตามลำดับ
-3. deploy-k3s depends_on: scan-core + scan-web (ต้องผ่านทั้งคู่)
-4. smoke-test depends_on: deploy-k3s
-5. email-success/failure depends_on: smoke-test
-```
+### สิ่งที่ควรโชว์
+
+1. `src/phase2-final/k8s/traefik-routing.yaml`
+2. Stage `canary-deploy`
+3. Stage `canary-analyze`
+4. Stage `promote-stable` หรือ `auto-rollback`
 
 ---
 
-## 📊 สรุป: ก่อน vs หลังปรับปรุง
+## 3.5 Post-Deploy Verification และ Notification
 
-```
-                    ก่อน                          หลัง
-                    ────                          ────
-Stages:             4                             7
-Database:           SQLite (1 replica)            PostgreSQL (multi-replica)
-Deploy strategy:    Recreate (downtime)           RollingUpdate (zero downtime)
-Security scan:      ❌ ไม่มี                      ✅ Trivy block CRITICAL
-Post-deploy check:  ❌ ไม่มี                      ✅ Smoke test CRUD
-Email:              plain text                    HTML table + links
-Backup:             ❌ manual                     ✅ CronJob ทุกคืน
-Quality gates:      1 (test)                      3 (test → scan → smoke)
-Parallel steps:     ❌ ไม่มี                      ✅ build + scan parallel
-Tool เพิ่ม:         ไม่มี                         ไม่มี (Woodpecker ตัวเดียว)
-```
+### สิ่งที่เปลี่ยน
+
+1. หลัง promote ยังมี smoke test บน public URL
+2. มี release tag automation
+3. มี k6 และ ZAP เป็น post-deploy analysis
+4. มี HTML email notifications สำหรับ success / rollback / failure
+
+### ทำไมสำคัญ
+
+1. ปิด feedback loop หลัง deploy
+2. ช่วยให้ reviewer เห็นว่าความสำเร็จของระบบถูกพิสูจน์หลายชั้น
+3. เพิ่มความเป็น production-like ของ pipeline story
+
+### สิ่งที่ควรโชว์
+
+1. Stage `smoke-test`
+2. Stage `k6-load-test` และ `dast-zap`
+3. email evidence หรือ screenshot
 
 ---
 
-## 🎯 ลำดับที่แนะนำ
+## 4. สิ่งที่ควรพูดเวลาอธิบาย improvement เหล่านี้
 
-| # | งาน | เวลาประมาณ | ว้าวจากอะไร |
-|:-:|------|:----------:|------------|
-| 1 | SQLite → PostgreSQL | 3–4 ชม. | zero downtime deploy + scale ได้ |
-| 2 | เพิ่ม Trivy scan | 30 นาที | มี security gate ใน pipeline |
-| 3 | เพิ่ม smoke test | 30 นาที | พิสูจน์ว่า deploy แล้วใช้ได้จริง |
-| 4 | ปรับ email เป็น HTML | 30 นาที | ดู professional เวลา forward ให้คนอื่น |
-| 5 | PG backup CronJob | 1 ชม. | automated disaster recovery |
-| 6 | ปรับ flow เป็น parallel | 30 นาที | เร็วขึ้น + แสดง dependency graph สวย |
+ใช้ pattern นี้ได้กับทุก improvement
 
-**รวม ~6 ชั่วโมง** — ไม่มี tool เพิ่ม, Woodpecker ตัวเดียวจัดการทั้งหมด
+1. ก่อนมีสิ่งนี้ ระบบเสี่ยงอะไร
+2. หลังเพิ่มสิ่งนี้ ระบบกันความเสี่ยงได้ตรงไหน
+3. หลักฐานของมันอยู่ที่ stage ไหน / log ไหน / manifest ไหน
+
+ตัวอย่างประโยค
+
+> “สิ่งที่เปลี่ยนใน Phase 2 Final ไม่ใช่แค่จำนวน step ที่มากขึ้น แต่คือการย้าย risk checks ไปอยู่ใกล้จุดที่ควรตรวจและมี evidence รองรับชัดขึ้น”
+
+---
+
+## 5. สิ่งที่ยังเป็น next step จริง ๆ
+
+แม้ pipeline จะโตขึ้นมากแล้ว แต่ยังมีสิ่งที่ควรพูดว่า “ยังไม่ครบ” อย่างตรงไปตรงมา
+
+1. signature verification ก่อน promote
+2. restore drill และ retention policy ของ backup
+3. log aggregation และ alert tuning
+4. frontend lint / E2E / synthetic CRUD checks
+5. secret rotation หรือ external secret manager
+
+ประเด็นนี้สำคัญ เพราะช่วยกันการ overclaim ตอนตอบคำถาม reviewer
+
+---
+
+## 6. สิ่งที่ควรโชว์ในวันนำเสนอจากเอกสารนี้
+
+ถ้ามีเวลาเปิดเพียง 5 จุด ให้เรียงลำดับดังนี้
+
+1. `.woodpecker/main-push.yml`
+2. Woodpecker run ล่าสุด
+3. `traefik-routing.yaml`
+4. `postgres-statefulset.yaml`
+5. email หรือ monitoring evidence
+
+---
+
+## 7. สรุป
+
+Phase 2 Final ไม่ได้มีแค่ “pipeline เพิ่มขึ้น” แต่มี pipeline ที่ทำหน้าที่ชัดเจนขึ้นเป็นลำดับ ตั้งแต่ policy/quality checks, artifact trust, data safety, canary control, post-deploy verification ไปจนถึง notification เอกสารนี้จึงควรถูกใช้เป็น map สำหรับอธิบายว่า improvement ไหนอยู่ตรงไหนและควรโชว์ evidence ตรงจุดใดในวันเดโม

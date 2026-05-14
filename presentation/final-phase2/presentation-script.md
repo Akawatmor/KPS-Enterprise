@@ -1,415 +1,346 @@
 # Detailed Live Presentation Script — Phase 2 Final
 
-## 1. เป้าหมายของสคริปต์นี้
+## 1. จุดประสงค์ของสคริปต์นี้
 
-สคริปต์นี้ออกแบบมาสำหรับการนำเสนอแบบ Owner-led ในรอบ Pod Review ที่มีเวลา 22 นาที และต้องมีทั้งการอธิบาย baseline ของระบบ, การโชว์ normal case, การรับ change request หรือ failure/risk จาก reviewer, และการทำ making change แบบสด ๆ ให้เห็นผ่าน pipeline จริง
+สคริปต์นี้ออกแบบมาสำหรับการนำเสนอ Final Demo ของ Phase 2 ที่ต้องทำให้คนฟังเข้าใจว่าโปรเจกต์นี้ไม่ได้มีแค่ Todo application ที่เปิดใช้งานได้ แต่มีทั้ง runtime path, deployment path, observability path และ evidence path ที่สอดกันจริง
 
-แกนหลักที่ต้องยึดตลอดการพูดมี 4 ข้อ
+ประเด็นสำคัญที่เอกสารนี้ยึดคือ
 
-1. อธิบาย baseline เดิมให้คนฟังเข้าใจตรงกันก่อนว่า “ระบบที่ถูกต้อง” หน้าตาเป็นอย่างไร
-2. เชื่อมทุกช่วงกับแนวคิด CI/CD ให้ชัด เช่น build, test, deploy, automation, feedback loop
-3. ทำ live change ที่เล็ก ปลอดภัย และสังเกตผลได้ผ่าน pipeline ภายในเวลา review
-4. จบด้วยการบอกให้ชัดว่าหลังจาก baseline นี้ กลุ่มถัดไปสามารถเล่าเฉพาะส่วนที่ตนเองต่อยอดได้โดยไม่ต้องเล่าทุกอย่างซ้ำ
+1. ใช้ **สิ่งที่ active จริงใน Phase 2** เป็นฐาน ไม่เล่าย้อนกลับไปหา pipeline หรือไฟล์เก่าที่ไม่ได้ใช้งานแล้ว
+2. เน้น **delivered improvements** ที่ทำเสร็จแล้ว เช่น quality gates, security scan, canary analysis, smoke test, monitoring และ notification
+3. ใช้ live change เป็น **ตัวเลือกสำรอง** เฉพาะกรณี reviewer ขอเท่านั้น ไม่ใช้เป็นแกนหลักของเรื่องเล่า
+4. ทุกช่วงต้องตอบได้ว่า “สิ่งที่พูดอยู่พิสูจน์ด้วยจอไหนหรือ log ไหน”
 
----
+พูดสั้น ๆ ได้ว่า
 
-## 2. Source of Truth ที่ต้องยึดระหว่างพูด
-
-ระหว่างนำเสนอ ให้ยึดเอกสารและโค้ดชุดนี้เป็นหลัก
-
-1. `src/phase2-final/` เป็น source of truth หลักของ application, manifests และ Woodpecker pipeline
-2. `document/phase2/` เป็น source of truth หลักของการอธิบายเหตุผล, report, guide และ change request
-3. `implementation/phase2/implementation-info.md` ใช้เสริมเรื่อง environment และ flow การติดตั้ง
-4. `presentation/checkpoint/` ใช้ดู pattern การเล่าเดิมได้ แต่ไม่ใช้เป็น baseline ทางเทคนิคของ Phase 2
-5. `document/phase1/` ใช้ได้แค่ในฐานะ “อดีตที่เปลี่ยนผ่านมา” เช่น Jenkins/EKS เดิม ไม่ควรเอามาปนกับของที่ active ใน Phase 2
-
-ประโยคสั้น ๆ ที่ควรพูดตั้งแต่ต้น
-
-> “วันนี้เรายึด Phase 2 เป็นหลักครับ โดย source of truth คือ `src/phase2-final`, `document/phase2`, และ `implementation/phase2` ส่วนของ Phase 1 เราจะใช้แค่เพื่ออธิบายว่าระบบ evolve มาอย่างไร ไม่ใช้เป็น baseline ปัจจุบันของเดโมนี้”
+> “Final Demo นี้เราจะไม่ขาย concept เปล่า ๆ แต่จะชี้ให้เห็นว่าระบบ Phase 2 มี baseline ที่ deploy ได้, ตรวจได้, rollback ได้ และอธิบาย evidence ได้จริง”
 
 ---
 
-## 3. สิ่งที่ต้องพูดเรื่อง Safety Boundary ให้ชัดตั้งแต่นาทีแรก
+## 2. Message หลักที่ต้องทำให้ผู้ฟังจำให้ได้
 
-นี่คือหัวใจสำคัญ เพราะโจทย์กำหนดว่า change request ต้องเป็น small, safe, observable
+ตลอดการพูด ให้ผู้ฟังจำ 5 เรื่องนี้ให้ได้
 
-| หัวข้อ | สิ่งที่ต้องพูด |
-|---|---|
-| สิ่งที่เราจะทำ | แก้เฉพาะ configuration หรือ code change เล็ก ๆ ที่เห็นผลผ่าน pipeline |
-| สิ่งที่เราจะไม่ทำ | ไม่ลบ resource, ไม่ `terraform destroy`, ไม่แก้ production credential จริง, ไม่รันคำสั่ง destructive |
-| Blast radius | จำกัดให้แตะเฉพาะไฟล์เดียวหรือจุดเล็กเดียวของ pipeline/application |
-| Evidence | ทุก change ต้องมี observable output เช่น pipeline stage ใหม่, health check, test result, rollout status, หรือ UI เปลี่ยนชัด |
-| Rollback | ต้อง revert ได้เร็ว เช่น revert commit หรือ `kubectl rollout undo` |
+1. ระบบคือ **TodoApp Big Calendar** ที่มีปลายทางชัดเจนฝั่งผู้ใช้
+2. runtime path คือ **Browser → Nginx/Traefik → Frontend + Weighted Backend → PostgreSQL**
+3. delivery path คือ **`.woodpecker/main-push.yml`** ที่ทำ pre-flight, quality, build, sign/scan, canary, verify และ notify ครบ
+4. จุดเด่นของ Phase 2 คือ **evidence-driven delivery** ไม่ใช่แค่ deploy automation
+5. ถ้าจะทำ live change ระหว่างเดโม ให้เลือก change เล็ก ๆ ที่ไม่ขายของเก่าว่าเป็นของใหม่
 
-ประโยคที่ควรพูดแบบตรง ๆ
+ประโยคเปิดที่จำง่ายที่สุด
 
-> “เพื่อให้เดโมปลอดภัย เราจะไม่แตะ secret จริง, ไม่ลบ resource, ไม่เปลี่ยน credential production, และไม่ทำ requirement ที่กินเวลากว่า 10 นาที เราจะเลือกการเปลี่ยนที่เล็ก ปลอดภัย และเห็นผลผ่าน pipeline ชัดที่สุด”
+> “วันนี้เราจะพาเห็นว่า Phase 2 ของเราไม่ใช่แค่ app ที่ขึ้นได้ แต่เป็นระบบส่งมอบที่มี baseline, safety gate, observability และ rollback path ที่อธิบายได้ครบครับ”
 
 ---
 
-## 4. สิ่งที่ต้องเตรียมก่อนขึ้นเดโมจริง
+## 3. Source of Truth และเส้นแบ่งที่ต้องพูดให้ชัด
 
-## 4.1 หน้าจอที่ควรเปิดค้างไว้ล่วงหน้า
+ระหว่างนำเสนอ ให้ยึดชุดนี้เป็นหลัก
 
-1. สไลด์ `presentation/final-phase2/slides.md` หรือ export ที่จะใช้พรีเซนต์
-2. VS Code เปิดที่ `src/phase2-final/.woodpecker.yml`
-3. VS Code tab สำรองที่ `document/phase2/reqchange.md`
-4. VS Code tab สำรองที่ `src/phase2-final/frontend/package.json`
-5. VS Code tab สำรองที่ `src/phase2-final/frontend/__tests__/page.test.tsx`
-6. Browser tab ที่หน้าแอป TodoApp Big Calendar
-7. Browser tab ที่ Woodpecker UI หรือภาพ run ล่าสุดที่แสดงสถานะสำเร็จ
-8. Terminal ที่ล็อกอินไว้พร้อมรัน `kubectl` ได้แล้ว
+1. `src/phase2-final/` สำหรับแอป, manifests, monitoring resources และ scripts
+2. `.woodpecker/main-push.yml` สำหรับ production deployment pipeline
+3. `.woodpecker/develop-push.yml`, `.woodpecker/pull-request.yml`, `.woodpecker/tag-release.yml` สำหรับ routing ของ event อื่น
+4. `document/phase2/` สำหรับเหตุผล, รายงาน, mapping ของ improvements และเดโม
+5. `implementation/phase2/implementation-info.md` สำหรับบริบทการติดตั้ง
 
-## 4.2 คำสั่งที่ควรเตรียมไว้ใน terminal
+สิ่งที่พูดได้อย่างมั่นใจ
+
+1. backend ใช้ Go 1.25
+2. frontend ใช้ Next.js 15.5 และ React 19
+3. production database บน K3s ใช้ PostgreSQL 16 StatefulSet
+4. pipeline active เป็นแบบ split files ใน `.woodpecker/` ไม่ใช่ root `.woodpecker.yml`
+5. main push pipeline มี 12-stage logic ถ้านับ 0-10 พร้อม stage 9b
+6. canary ใช้ weighted route 90/10 ระหว่าง analysis และกลับเป็น 100/0 หลัง promote หรือ rollback
+
+สิ่งที่ไม่ควรพูดอีก
+
+1. อย่าพูดว่า active pipeline อยู่ใน `src/phase2-final/.woodpecker.yml`
+2. อย่าพูดว่า “วันนี้จะเพิ่ม frontend quality gate” เพราะ `quality-frontend` อยู่ใน baseline แล้ว
+3. อย่าพูดว่า Trivy, Cosign, SBOM หรือ canary 10% เป็น next step เพราะของเหล่านี้ active แล้ว
+4. อย่าพูดว่า pipeline มีแค่ test → build → deploy → email เพราะนั่นลดค่าของสิ่งที่ทำไว้จริง
+
+ประโยคที่ควรใช้ตั้งแต่ต้น
+
+> “Source of truth หลักของรอบนี้คือ `src/phase2-final` กับ `.woodpecker/` ครับ เพราะสิ่งที่เราต้องการสื่อคือ baseline ที่ active จริงใน Phase 2 Final ไม่ใช่ baseline ระหว่างทาง”
+
+---
+
+## 4. สิ่งที่ต้องเตรียมก่อนขึ้นเดโม
+
+### 4.1 หน้าจอที่ควรเปิดค้างไว้
+
+1. Slide deck จาก `presentation/final-phase2/slides.md`
+2. Browser หน้า `https://todoapp-kps.akawatmor.com`
+3. Woodpecker UI ที่ run ล่าสุดของ main push
+4. VS Code เปิด `.woodpecker/main-push.yml`
+5. VS Code tab สำรองที่
+   - `src/phase2-final/k8s/ingress.yaml`
+   - `src/phase2-final/k8s/traefik-routing.yaml`
+   - `src/phase2-final/k8s/postgres-statefulset.yaml`
+   - `src/phase2-final/frontend/package.json`
+   - `document/phase2/reqchange.md`
+6. ถ้ามีเวลา เปิด Grafana หรืออย่างน้อย monitoring manifests
+
+### 4.2 คำสั่งที่ควรเตรียมใน terminal
 
 ```bash
 kubectl get pods -n todoapp
-kubectl get deploy -n todoapp
-kubectl get ingress -n todoapp
-kubectl rollout status deployment/todoapp-core -n todoapp --timeout=60s
-kubectl rollout status deployment/todoapp-web -n todoapp --timeout=60s
+kubectl get deploy,statefulset -n todoapp
+kubectl get ingress,ingressroute,traefikservice -n todoapp
+kubectl get servicemonitor,prometheusrule -n monitoring
 ```
 
-ถ้าต้องเตรียมคำสั่งสำหรับพูดเรื่อง Git และ change สด ให้เตรียมไว้ด้วย
+### 4.3 สิ่งที่ต้องเช็กก่อนเริ่ม
 
-```bash
-git status
-git add src/phase2-final/.woodpecker.yml
-git commit -m "ci: add frontend quality gate before web build"
-git push origin main
-```
-
-## 4.3 ของที่ต้องเช็กก่อนเริ่ม
-
-1. Browser เข้าหน้าแอปได้จริง
-2. Woodpecker UI login ไว้แล้ว
-3. Terminal มี kubeconfig พร้อม
-4. ไม่มีหน้าจอไหนเปิด secret หรือ token คาไว้
-5. Font ใน editor ใหญ่พอให้คนทั้งห้องอ่านได้
-6. `git status` ไม่รกด้วยไฟล์ที่ไม่เกี่ยวกับเดโม
+1. Browser เข้าแอปได้จริง
+2. Woodpecker login ค้างไว้แล้ว
+3. terminal พร้อม `kubectl`
+4. ไม่มี secret, token, หรือ kubeconfig แบบเต็มเปิดค้างบนจอ
+5. ฟอนต์ editor และ terminal ใหญ่พอสำหรับคนทั้งห้อง
+6. ถ้าจะใช้ screenshot ของ run ก่อนหน้า ต้องพูดตรง ๆ ว่าเป็น evidence จาก run ล่าสุด ไม่ใช่ live execution
 
 ---
 
-## 5. ถ้ามี 2 คนในทีม ให้แบ่งบทแบบนี้
+## 5. Improvements ที่ “ต้องโชว์” ให้ครบ
 
-| บทบาท | สิ่งที่รับผิดชอบ |
-|---|---|
-| Owner A | เล่า story, คุมเวลา, รับ requirement จาก reviewer, อธิบายเหตุผลเชิง DevOps/CI/CD |
-| Owner B | เปิดจอ, เลื่อนโค้ด, รันคำสั่ง, ทำ live change, ชี้ evidence ให้เห็น |
+| กลุ่ม improvement | สิ่งที่ต้องสื่อ | สิ่งที่ต้องเปิดให้ดู |
+|---|---|---|
+| Quality | pipeline ไม่ได้เช็กแค่ backend แต่เช็ก frontend และ integration ด้วย | Stage 1 และ Stage 2 ใน Woodpecker |
+| Security / Policy | pre-flight และ sign/scan มีจริง | `secret-scan`, `dockerfile-lint`, `k8s-lint`, `opa-policy`, `sign-and-scan` |
+| Data safety | ก่อน deploy มี `pg_dump` และ migration test | `db-prep`, `migration-test`, PostgreSQL StatefulSet |
+| Delivery safety | ไม่ deploy แบบ blind แต่ใช้ canary + metrics | `canary-deploy`, `canary-analyze`, weighted route |
+| Runtime verification | หลัง promote ยังมี smoke test และ public health check | `smoke-test`, `/healthz`, public root page |
+| Observability | มี monitoring และ notification | Grafana/Prometheus evidence, email success/rollback/failure |
+| Post-deploy analysis | มี k6 และ ZAP แม้เป็น non-blocking | Stage 9b |
 
-ถ้ามีคนเดียว ให้ใช้สคริปต์นี้ทั้งหมด แต่ยังควรแยก mindset ให้ชัดว่า “ตอนนี้กำลังเล่า concept” และ “ตอนนี้กำลังปฏิบัติบนจอ”
+ประโยคสั้น ๆ ที่ช่วยล็อกใจความ
 
----
-
-## 6. โครงเรื่องหลักที่ต้องทำให้คนฟังจำได้
-
-ตลอด 22 นาที ให้คนฟังจำให้ได้ 5 เรื่องนี้
-
-1. ระบบนี้คือ TodoApp Big Calendar แบบ full stack
-2. Deployment path ปัจจุบันคือ Browser → Traefik Ingress → Frontend/Backend → PostgreSQL บน K3s
-3. Delivery path ปัจจุบันคือ Git push → Woodpecker → test → build/push → deploy → rollout check → smoke test → email
-4. Live change ที่เราเลือกต้อง reinforce quality gate หรือ feedback loop ไม่ใช่เปลี่ยนอะไรสุ่ม ๆ
-5. สิ่งที่กลุ่มถัดไปควรอ้างต่อได้คือ baseline เดิม, ไม่ใช่กลับไปเล่า architecture ใหม่ทั้งหมด
+> “สิ่งที่เราควรโชว์ไม่ใช่แค่ pipeline สีเขียว แต่ต้องโชว์ว่าแต่ละ stage ลดความเสี่ยงอะไรให้ระบบ”
 
 ---
 
-## 7. สคริปต์ละเอียดตามช่วงเวลา 22 นาที
+## 6. 22-Minute Detailed Flow
 
-## 7.1 นาที 0–3 — Owner Brief ระบบ + repo/app/pipeline + safety boundary
+## 6.1 นาที 0–2 — เปิดเรื่องและล็อก baseline ให้ตรงกัน
 
 ### หน้าจอที่ต้องเปิด
 
-1. Slide หน้าปก
-2. Slide ภาพรวมระบบหรือ agenda
-3. ถัดมาคือ slide architecture สั้น ๆ
+1. Slide ปก
+2. Slide contract / source of truth
 
-### สิ่งที่ต้องชี้ด้วยเมาส์
+### สิ่งที่ควรพูด
 
-1. ชื่อโปรเจกต์และขอบเขตว่าเป็น Phase 2
-2. source of truth ของโค้ดและเอกสาร
-3. safety boundary ว่าวันนี้จะไม่ทำอะไรเสี่ยง
+> “วันนี้เราจะใช้ Phase 2 Final เป็น baseline เดียวกันทั้งชุดครับ โดย source of truth หลักคือ `src/phase2-final` กับ `.woodpecker/` เพราะสิ่งที่อยากให้เห็นไม่ใช่แค่ฟีเจอร์ของแอป แต่คือระบบส่งมอบทั้งหมดที่ active จริง”
 
-### บทพูดแนะนำแบบละเอียด
+> “แกนของรอบนี้มี 2 อย่าง คือ หนึ่ง establish baseline ให้ชัด และสองพิสูจน์ delivered improvements ด้วย evidence บนจอ เช่น pipeline, runtime state, canary route, monitoring และ notification”
 
-> “สวัสดีครับ วันนี้กลุ่มเราจะนำเสนอ Phase 2 ของ KPS-Enterprise โดย baseline ที่เราใช้จริงคือ TodoApp Big Calendar ที่ deploy อยู่บน K3s แบบ self-hosted และใช้ Woodpecker เป็น CI/CD หลักครับ”
+### สิ่งที่ต้องย้ำ
 
-> “เพื่อไม่ให้ข้อมูลปนกัน วันนี้เราจะยึด `src/phase2-final`, `document/phase2` และ `implementation/phase2` เป็น source of truth หลัก ส่วน Phase 1 อย่าง Jenkins หรือ EKS เราจะพูดในฐานะของเดิมที่เคยวิเคราะห์ไว้เท่านั้น”
-
-> “เป้าหมายของเราในรอบนี้มี 3 อย่าง คือ หนึ่ง ทำให้ทุกคนเห็น baseline เดิมที่ถูกต้องก่อน สอง แสดง normal case ของระบบและ pipeline แบบสั้นแต่ครบ และสาม รับ change request ที่เล็ก ปลอดภัย และเห็นผลได้ผ่าน pipeline ในเวลาจำกัด”
-
-> “เรื่อง safety boundary เราจะไม่ลบ resource, ไม่ run terraform destroy, ไม่แก้ production credential จริง และไม่ทำ requirement ที่ใหญ่เกิน 10 นาที เราจะเลือก change ที่มี blast radius ต่ำและ rollback ได้เร็ว”
-
-### ประโยคสรุปท้ายช่วง
-
-> “หลังจาก 3 นาทีแรกนี้ เราต้องทำให้ reviewer และกลุ่มถัดไปเข้าใจตรงกันก่อนว่า baseline เดิมหน้าตาเป็นอย่างไร เพื่อที่รอบต่อไปจะได้เล่าเฉพาะสิ่งที่เปลี่ยน ไม่ต้องย้อนเล่า architecture ทั้งหมดใหม่”
+1. เราไม่ได้จะพรีเซนต์ feature ที่ยังไม่ทำ
+2. ถ้ามี live change จะเป็น optional backup เท่านั้น
+3. เรื่องที่เล่าต่อจากนี้ต้องอ้างอิงไฟล์ active จริงทั้งหมด
 
 ---
 
-## 7.2 นาที 3–7 — แสดง Normal Case สั้น ๆ เพื่อ establish baseline
+## 6.2 นาที 2–5 — โชว์ user-facing baseline และ runtime state
 
-### หน้าจอที่ต้องเปิดตามลำดับ
+### หน้าจอที่ต้องเปิด
 
 1. Browser หน้า TodoApp Big Calendar
 2. Terminal `kubectl get pods -n todoapp`
-3. VS Code เปิด `src/phase2-final/.woodpecker.yml`
-4. Woodpecker UI run ล่าสุด หรือภาพ run ล่าสุด
 
-### สิ่งที่ต้องทำบนจอ
+### สิ่งที่ควรทำบนจอ
 
-1. เปิดหน้าแอปให้เห็น calendar, stats bar, และ day panel
-2. คลิกวันหนึ่งวันเพื่อโชว์ว่า UI หลักใช้งานได้
-3. กลับไป terminal ให้เห็น pods ของ `todoapp-core`, `todoapp-web`, และ `todoapp-postgres`
-4. เปิด pipeline ให้เห็น flow ปัจจุบัน
+1. เปิดหน้า calendar
+2. คลิกวันที่หนึ่งวันให้เห็น day panel
+3. สลับไป terminal เพื่อโชว์ pods, deployments และ statefulset
 
-### บทพูดแนะนำแบบละเอียด
+### สิ่งที่ควรพูด
 
-> “ใน normal case ตอนนี้ user เข้าหน้าแอปผ่าน ingress แล้วจะเจอหน้า Big Calendar เป็น entry point หลัก เห็นภาพรวมงานทั้งเดือน และเมื่อคลิกวันที่ใดวันที่หนึ่ง ก็จะเปิด panel ด้านข้างเพื่อจัดการ todo ของวันนั้นได้ทันที”
+> “ปลายทางของทุก deploy คือประสบการณ์ผู้ใช้ตรงนี้ครับ คือหน้า Big Calendar ที่ผู้ใช้คลิกวันแล้วจัดการงานได้จริง”
 
-> “จุดที่สำคัญของ baseline นี้คือมันไม่ใช่แค่ UI สวย แต่ต้องเชื่อมกับ deployment จริงบน cluster ด้วย ดังนั้นผมจะสลับมาที่ terminal ให้เห็นว่าใน namespace `todoapp` มี frontend, backend, และ PostgreSQL ที่เป็น data layer ทำงานอยู่”
+> “แต่เพื่อไม่ให้เดโมลอยจาก runtime ผมจะสลับมาดู cluster state ด้วยว่า frontend, backend path และ PostgreSQL ขึ้นอยู่จริงใน namespace `todoapp`”
 
-> “ส่วน deployment design ปัจจุบัน backend รัน 2 replicas แบบ RollingUpdate เพื่อให้ rollout ได้แบบลด downtime และ frontend ก็รัน 2 replicas เช่นกัน เพื่อให้พร้อมรับ traffic ผ่าน Traefik ingress”
+### จุดที่ผู้ชมควรเห็น
 
-> “ในมุม pipeline ปัจจุบัน flow หลักของ Woodpecker คือ เริ่มจาก test-backend ก่อน จากนั้น build และ push image ของ backend กับ frontend ไป Docker Hub แล้วจึง deploy ไป K3s, รอ rollout status, ทำ smoke test ที่ `/healthz` และแจ้งผลผ่าน email”
-
-> “ตรงนี้คือ baseline ที่ reviewer ควรเห็นก่อนว่า ถ้าระบบถูกต้อง มันควรทำงานแบบนี้ และหลังจากนี้ไม่ว่าเราจะรับ change แบบไหน เราจะวัดจาก baseline เดิมชุดนี้”
-
-### ข้อสังเกตที่ควรพูดแทรกเพื่อเชื่อมกับ CI/CD
-
-1. “สิ่งที่เราโชว์เมื่อกี้คือ feedback loop จากฝั่ง runtime”
-2. “ส่วน pipeline ด้านหลังคือ feedback loop จากฝั่ง delivery”
-3. “สองส่วนนี้ต้องสอดกัน ไม่ใช่ green pipeline แต่ runtime ใช้จริงไม่ได้”
+1. มี frontend route ที่ตอบได้จริง
+2. มี PostgreSQL StatefulSet เป็น data layer จริง
+3. baseline ฝั่ง runtime ไม่ใช่แค่รูปในสไลด์
 
 ---
 
-## 7.3 นาที 7–10 — Reviewer ให้ change request หรือ failure/risk ที่จะตรวจ
+## 6.3 นาที 5–8 — อธิบาย runtime architecture และ routing ที่สำคัญ
 
-### เป้าหมายของช่วงนี้
+### หน้าจอที่ต้องเปิด
 
-1. รับ requirement ให้ชัดในคำพูดเดียว
-2. ประเมินทันทีว่า small, safe, observable หรือไม่
-3. ถ้า reviewer ยังไม่เสนอ ให้เราขอหยิบ requirement ที่เตรียมไว้ล่วงหน้า
+1. Slide architecture
+2. `src/phase2-final/k8s/ingress.yaml`
+3. `src/phase2-final/k8s/traefik-routing.yaml`
+4. `src/phase2-final/k8s/postgres-statefulset.yaml`
 
-### ประโยคที่ควรถาม reviewer
+### สิ่งที่ควรพูด
 
-> “ขอรับ requirement หรือ failure/risk ที่เล็ก ปลอดภัย และสามารถสังเกตผลผ่าน pipeline ได้ภายในเวลาประมาณ 10 นาทีครับ”
+> “runtime path ของระบบนี้เริ่มจาก public domain ผ่าน Nginx/Traefik โดย path ทั่วไปไป frontend ส่วน `/api`, `/healthz`, และ `/readyz` ไป backend weighted route ที่สามารถสลับระหว่าง stable กับ canary ได้”
 
-ถ้า reviewer ยังไม่เลือก ให้เสนอ option ที่เตรียมไว้ทันที
+> “ประเด็นนี้สำคัญมาก เพราะ canary analysis ของเราไม่ได้อาศัยแค่ rollout status แต่ใช้ weighted backend route จริงใน TraefikService”
 
-> “ถ้า reviewer ยังไม่ specify เราขอเลือก requirement change ที่เราเตรียมไว้ คือเพิ่ม frontend quality gate ใน Woodpecker ให้ frontend ต้องผ่าน `npm run type-check` และ `npm run test:ci` ก่อน build web image ครับ เพราะ change นี้เล็ก ปลอดภัย และ observable ชัดมากใน pipeline”
+> “ฝั่ง data layer ใช้ PostgreSQL StatefulSet บน iSCSI-backed storage และมี readiness/liveness/startup probes ชัดเจน ดังนั้น story ของเราไม่ใช่แค่ deploy app แต่คือ deploy app บนฐานข้อมูลที่ตรวจสุขภาพได้จริง”
 
-### เหตุผลที่ต้องพูดให้ครบ
+### สิ่งที่ต้องชี้ด้วยเมาส์
 
-> “เหตุผลที่เลือกอันนี้เพราะ frontend มี script และ test อยู่แล้วใน repo แต่ baseline pipeline ปัจจุบันยังตรวจ backend เป็นหลัก ถ้าเราเพิ่ม gate ฝั่ง frontend ได้สำเร็จ เราจะยกระดับคุณภาพของ pipeline โดยไม่ต้องเปลี่ยน architecture หรือแตะ production secret”
-
-> “ถ้า change นี้ผ่าน สิ่งที่ reviewer จะเห็นคือมี stage ใหม่เกิดขึ้นใน Woodpecker และ `build-push-web` จะไม่ทำงานจนกว่า frontend gate จะผ่าน นี่คือ observable output ที่ตรงโจทย์ที่สุด”
-
-### สิ่งที่ต้องเปิดเสริมบนจอ
-
-1. `document/phase2/reqchange.md`
-2. `src/phase2-final/frontend/package.json`
-3. `src/phase2-final/frontend/__tests__/page.test.tsx`
-
-### ประโยคเชื่อมจากเอกสารไปสู่การลงมือแก้
-
-> “จากเอกสาร change request เราเลือก requirement นี้เพราะใช้ของที่มีอยู่แล้วใน repo ได้แก่ script `type-check`, `test:ci` และชุด test หน้า calendar จริง จึงไม่ใช่การสร้าง flow ใหม่จากศูนย์ แต่เป็นการย้าย quality control ที่มีอยู่แล้วมาอยู่ใน pipeline”
+1. frontend Ingress catch-all
+2. backend IngressRoute + TraefikService weighted
+3. PostgreSQL probes และ securityContext
 
 ---
 
-## 7.4 นาที 10–16 — Owner + Reviewer ทำ live change, trigger, และ test เท่าที่ทำได้
+## 6.4 นาที 8–12 — เปิด `.woodpecker/main-push.yml` และเล่า pipeline เป็นกลุ่ม stage
 
-### เป้าหมายของช่วงนี้
+### หน้าจอที่ต้องเปิด
 
-1. แก้ไฟล์ให้น้อยที่สุด
-2. อธิบายเหตุผลของแต่ละบรรทัดที่เพิ่ม
-3. trigger pipeline ให้ได้
-4. เริ่มอ่านผลลัพธ์แบบ real time
+1. `.woodpecker/main-push.yml`
+2. ถ้าทำได้ สลับไป Woodpecker graph หลังอธิบายแต่ละกลุ่ม stage
 
-### ไฟล์ที่ต้องเปิด
+### วิธีเล่าที่ชัดที่สุด
 
-1. `src/phase2-final/.woodpecker.yml`
-2. `src/phase2-final/frontend/package.json`
-3. Woodpecker UI
+แบ่งการเล่าเป็น 4 กลุ่ม ไม่ต้องอ่านทุก step ตรง ๆ
 
-### Live change ที่แนะนำที่สุด
+1. **ก่อน build**: Stage 0-2 คือ pre-flight, quality gates และ integration test
+2. **หลัง build**: Stage 3-5 คือ build/push, sign/scan และ DB operations
+3. **ตอน deploy**: Stage 6-8 คือ canary deploy, canary analysis, promote หรือ rollback
+4. **หลัง deploy**: Stage 9-10 คือ smoke test, release tag, post-deploy analysis และ email
 
-แทรก step นี้ใน `.woodpecker.yml` ก่อน `build-push-web`
+### บทพูดที่ใช้ได้ทันที
 
-```yaml
-  - name: test-frontend
-    image: node:22-bookworm-slim
-    commands:
-      - cd src/phase2-final/frontend
-      - npm ci
-      - npm run type-check
-      - npm run test:ci
-```
+> “ถ้าจะสรุป pipeline ของเราให้ง่ายที่สุด มันไม่ใช่ test → build → deploy แบบเส้นเดียว แต่เป็นชุดของ gates ที่ลดความเสี่ยงทีละชั้นครับ”
 
-ถ้าต้องการพูดให้ครบเชิงวิศวกรรม ให้พูดตามนี้ขณะพิมพ์
+> “ก่อน build เรามีทั้ง secret scan, Dockerfile lint, K8s lint, OPA policy, แล้วจึงรัน quality-backend กับ quality-frontend แบบขนาน ก่อนต่อด้วย integration test กับ Postgres”
 
-> “ผมจะเพิ่ม step ชื่อ `test-frontend` ไว้ก่อน `build-push-web` เพื่อให้ web image ถูกสร้างต่อเมื่อ frontend ผ่าน type checking และ automated tests แล้วเท่านั้น”
+> “หลังจากนั้นเราค่อย build/push images แล้ว sign และ scan ด้วย Cosign, SBOM, Trivy จากนั้นจึงทำ pg_dump backup และ migration test ก่อนถึงขั้น deploy จริง”
 
-> “เราใช้ `npm ci` เพราะในบริบท CI มัน deterministic กว่า `npm install` และเหมาะกับ pipeline ที่ต้อง reproducible”
-
-> “เราใช้ `type-check` เพื่อจับ contract error และ `test:ci` เพื่อจับ regression เชิง behavior ของหน้า calendar ก่อน image ถูก build และ push”
-
-### ถ้าต้องการอธิบายให้ reviewer เห็นว่าแตะน้อยจริง
-
-พูดสั้น ๆ ว่า
-
-> “การเปลี่ยนครั้งนี้แตะไฟล์เดียวคือ `.woodpecker.yml` และไม่กระทบ runtime configuration, secret, database, หรือ cluster resource ใด ๆ จึงถือว่า blast radius ต่ำมาก”
-
-### ขั้นตอนหลังแก้ไฟล์
-
-1. Save file
-2. `git diff` ให้ reviewer เห็นว่าเปลี่ยนเฉพาะ step ใหม่
-3. commit ด้วยข้อความสั้นและชัด
-4. push ไป branch ที่ trigger pipeline จริง
-5. เปิด Woodpecker UI ให้เห็น run ใหม่เริ่มต้น
-
-### ประโยคที่ควรพูดตอน trigger pipeline
-
-> “ตอนนี้เรายังไม่ได้อ้างว่าระบบดีขึ้นจากการพิมพ์ YAML อย่างเดียว เราจะให้ feedback loop ของ pipeline เป็นคนยืนยันครับ เพราะถ้า step ใหม่รันจริงและเป็นสีเขียว นั่นแปลว่า change มีผลจริง ไม่ใช่แค่แก้เอกสาร”
-
-### สิ่งที่ reviewer ควรได้เห็นภายในช่วงนี้
-
-1. step `test-frontend` ปรากฏใน pipeline
-2. log แสดง `npm ci`, `npm run type-check`, `npm run test:ci`
-3. ถ้าผ่าน จะเห็น pipeline เดินต่อไปสู่ `build-push-web`
-
-### ถ้าพอมีเวลาและ network ตอบไว
-
-ให้ชี้ log สำคัญ เช่น
-
-1. install dependencies สำเร็จ
-2. TypeScript ไม่มี error
-3. Jest tests ผ่าน
-4. Stage ถัดไปเริ่ม build web image
+> “จุดที่อยากให้คนฟังจำคือ deploy ของเราไม่ใช่ยิงขึ้น 100% ทันที แต่ปล่อย canary 10% แล้ววัดผลจาก traffic จริง 160 requests และ Prometheus metrics ก่อนค่อย promote หรือ rollback”
 
 ---
 
-## 7.5 นาที 16–19 — Owner อธิบายผลลัพธ์ ถ้า fail เกิดที่ไหน และจะ improve อย่างไร
+## 6.5 นาที 12–15 — พิสูจน์ delivered improvements ด้วย evidence
 
-ช่วงนี้ต้องตอบให้ได้ทั้งกรณี success และ failure
+### หน้าจอที่ต้องเปิด
 
-### ถ้า pipeline ผ่าน
+1. Woodpecker run ล่าสุด
+2. ถ้ามีเวลา เปิด Grafana หรือ monitoring manifests
+3. ถ้ามี evidence พร้อม เปิด email notification หรือ screenshot ที่ใช้งานได้จริง
 
-พูดตามนี้ได้เลย
+### สิ่งที่ควรพูด
 
-> “ผลลัพธ์ของ change นี้คือ pipeline ของเรามี quality gate ฝั่ง frontend เพิ่มขึ้นอย่างเป็นรูปธรรม และ gate นี้เกิดก่อนการ build web image จริง ดังนั้นถ้าในอนาคตมี type error หรือ test regression ฝั่ง UI ระบบจะหยุดก่อน deploy ได้”
+> “ตรงนี้คือ evidence หลักของ Phase 2 ครับ คือเราไม่ได้อ้างว่ามี canary, monitoring หรือ security scan แต่มี run ที่แสดง stage เหล่านี้จริง และสามารถชี้ได้ว่าแต่ละ stage ทำหน้าที่อะไร”
 
-> “สิ่งนี้สอดคล้องกับแนวคิด CI/CD ที่เรียนตรง ๆ คือเราเพิ่มขั้น test ให้เร็วขึ้นใน feedback loop และทำให้ deploy stage เชื่อถือได้มากขึ้น เพราะมันผ่าน quality checks มากกว่าเดิม”
+> “ถ้าดูจาก graph นี้ คนฟังควรเห็นว่า Stage 0-5 คือการลดความเสี่ยงก่อน deploy, Stage 6-8 คือการคุม blast radius ตอน deploy, และ Stage 9-10 คือการยืนยันผลหลัง deploy”
 
-> “ถ้ากลุ่มถัดไปจะต่อยอด เขาไม่จำเป็นต้องอธิบาย app, cluster, ingress หรือ pipeline baseline ใหม่ทั้งหมดแล้ว เขาสามารถเริ่มจาก baseline นี้และบอกเฉพาะว่าตัวเองต่อยอด gate, deploy, security, monitoring หรือ failure handling อย่างไร”
+### สิ่งที่ต้องชี้ให้เห็น
 
-### ถ้า pipeline fail ที่ `test-frontend`
-
-พูดแบบนี้
-
-> “แม้ผลลัพธ์รอบนี้จะเป็น fail แต่จริง ๆ นี่คือพฤติกรรมที่เราต้องการจาก quality gate เพราะระบบหยุดก่อน build และ deploy web image นั่นแปลว่า pipeline จับปัญหาได้เร็วขึ้นแทนที่จะปล่อยของที่มีปัญหาไปถึง cluster”
-
-> “เราจะดู log ว่า fail ที่ `npm ci`, `type-check`, หรือ `test:ci` แล้วแยกแนวทางแก้ตาม root cause ต่อไป แต่ในเชิง DevOps สิ่งที่สำคัญคือ feedback loop ทำงานแล้ว”
-
-### ถ้าระหว่างเดโม pipeline ยังไม่จบ
-
-พูดแบบนี้
-
-> “ในช่วงเวลาของ review เราอย่างน้อยยืนยันได้แล้วว่า stage ใหม่ถูก trigger จริงและกำลังทำงานตามที่ออกแบบไว้ ถ้ามีเวลาพอเราจะรอดูจนจบ แต่ถ้าไม่ เราจะถือว่า observable evidence ตอนนี้คือ pipeline graph เปลี่ยนและ log ของ stage ใหม่เริ่มรันแล้ว”
-
-### ประโยคปิดช่วงนี้
-
-> “ไม่ว่ารอบนี้จะผ่านหรือ fail สิ่งที่ได้คือเราทำให้ change เล็ก ๆ นี้แปลงเป็น evidence ผ่าน pipeline ไม่ใช่แค่การอธิบายด้วยคำพูด”
+1. `quality-frontend` มีอยู่แล้วใน baseline
+2. `sign-and-scan` มี Cosign/SBOM/Trivy จริง
+3. `canary-analyze` ใช้ metrics ไม่ใช่แค่ “รู้สึกว่าระบบโอเค”
+4. `auto-rollback` เป็นเส้นทางที่อธิบายได้
+5. `email-success` หรือ `email-rollback` มีไว้ปิด feedback loop ให้ทีม
 
 ---
 
-## 7.6 นาที 19–22 — Reviewer เขียน feedback + evidence
+## 6.6 นาที 15–17 — อธิบาย success/failure path ให้เป็นประโยชน์
 
-### สิ่งที่ owner ควรทำในช่วงนี้
+### สิ่งที่ควรพูดเมื่อถูกถามเรื่อง “ถ้า fail ล่ะ?”
 
-1. หยุดพูดยาว
-2. ตอบเฉพาะคำถามของ reviewer
-3. ชี้ evidence ที่ reviewer ต้องการอย่างตรงจุด
-4. สรุปสั้น ๆ ว่าควรให้ feedback เรื่องไหนได้บ้าง
+> “ถ้า fail ใน pre-flight หรือ quality gate เราถือว่าระบบทำงานถูก เพราะหยุดปัญหาก่อน image ถูกสร้าง”
 
-### ประโยคสรุปส่งให้ reviewer
+> “ถ้า fail ตอน canary analysis นั่นยิ่งสำคัญ เพราะ pipeline จะไม่ดัน traffic ไปของใหม่เต็มระบบ และ rollback route กลับสู่ stable path ได้ชัดเจน”
 
-> “สำหรับ evidence วันนี้ reviewer สามารถอ้างอิงได้ 3 อย่าง คือ baseline app/runtime ที่เราโชว์ก่อน, pipeline baseline เดิมใน `.woodpecker.yml`, และผลของ live change ที่เพิ่ม frontend quality gate จนเห็น stage ใหม่ใน Woodpecker ครับ”
+> “ดังนั้นคำว่า fail ในระบบนี้ต้องอธิบายเป็น stage-by-stage ไม่ใช่ตอบแค่ว่า pipeline แดง”
 
-> “ถ้าจะ feedback เชิงปรับปรุงต่อ ผมคิดว่ามุมที่มีประโยชน์ที่สุดคือเรื่อง security gate, config drift cleanup, rollback automation, และ monitoring/logging ครับ”
+### สิ่งที่ต้องเน้น
+
+1. failure ที่ดีคือ failure ที่เร็วและมี evidence
+2. success ที่ดีคือ success ที่พิสูจน์ผ่านทั้ง metrics และ public smoke test
 
 ---
 
-## 8. เมนู Live Change สำรอง ถ้า reviewer ไม่เลือก requirement หลัก
+## 6.7 นาที 17–19 — เชื่อมกับ DevOpsSec แบบไม่ overclaim
 
-ถ้า reviewer ไม่เอา `test-frontend` ให้เตรียม option สำรอง 3 แบบนี้
+### สิ่งที่ควรพูด
 
-| ตัวเลือก | ไฟล์ที่แก้ | สิ่งที่ observable | ทำไมปลอดภัย |
+> “ถ้ามองผ่านเลนส์ DevOpsSec จุดเด่นของ Phase 2 คือเราฝังความปลอดภัยและความน่าเชื่อถือไว้ในหลายชั้นแล้ว เช่น secret hygiene, policy/lint gates, signed and scanned images, weighted rollout, runtime hardening, monitoring และ alert/email feedback”
+
+> “สิ่งที่ยังพูดต่อได้อย่างซื่อสัตย์คือเรายังควรเพิ่ม signature verification ก่อน promote, secret rotation, restore drill, log aggregation และ alert tuning เพื่อให้ระบบ operate ได้แข็งแรงขึ้นอีก”
+
+### อย่าลืมชี้ให้ชัด
+
+1. ของที่มีแล้วคือ active baseline
+2. ของที่เหลือคือ next steps ไม่ใช่ของที่แอบอ้างว่าทำครบแล้ว
+
+---
+
+## 6.8 นาที 19–20 — ถ้า reviewer ขอ live change ให้ใช้เป็น backup เท่านั้น
+
+### ทางเลือกที่แนะนำ
+
+1. เปลี่ยนข้อความ/label เล็ก ๆ ใน frontend เพื่อให้เห็น deploy effect ชัด
+2. ปรับ wording หรือ link ใน email template เพื่อโชว์ notification path
+3. ปรับเอกสาร evidence ใน `document/phase2/` ให้ตรงกับ baseline
+
+### สิ่งที่ไม่ควรทำ
+
+1. อย่าเสนอเพิ่ม `quality-frontend`
+2. อย่าเสนอเพิ่ม Trivy, Cosign, SBOM หรือ canary 10% เพราะเป็น baseline แล้ว
+3. อย่าแก้ secret, database, หรือ routing กลางเดโมถ้าไม่ได้ถูกขอเฉพาะเจาะจงจริง ๆ
+
+ประโยคที่ใช้ได้ทันที
+
+> “ถ้าต้องมี live change เราขอเลือก change ที่เล็กและเป็น delta จริงจาก baseline ปัจจุบัน ไม่ใช่หยิบของที่ active อยู่แล้วมาทำเหมือนเพิ่งเพิ่มวันนี้ครับ”
+
+---
+
+## 6.9 นาที 20–22 — ปิดเรื่องและส่งไม้ให้ผู้ฟัง
+
+### ประโยคปิดที่แนะนำ
+
+> “สรุป Phase 2 Final ของเราไม่ใช่แค่ Todo application ที่ deploy ขึ้นได้ แต่เป็น baseline ที่มี runtime path, delivery path, canary path และ evidence path ครบพอให้กลุ่มถัดไปอ้างต่อได้ทันทีครับ”
+
+> “สิ่งที่ควรจำจากรอบนี้คือเราไม่ได้ใช้ pipeline แค่ทำ automation แต่ใช้ pipeline เป็นเครื่องพิสูจน์คุณภาพ ความปลอดภัย และผลลัพธ์ของการเปลี่ยนแปลงจริง”
+
+---
+
+## 7. Optional Live Change Menu
+
+| ตัวเลือก | ไฟล์ที่แตะ | สิ่งที่เห็นได้ | เหตุผลที่เหมาะ |
 |---|---|---|---|
-| เพิ่มข้อความหรือ version label ใน frontend | `src/phase2-final/frontend/app/page.tsx` | UI เปลี่ยนทันทีหลัง deploy | แตะ frontend จุดเดียว |
-| เพิ่ม README step เรื่อง health check หรือ rollback plan | `document/phase2/guide-new.md` หรือ `README.md` | reviewer เห็นเอกสารและ reproducibility ดีขึ้น | ไม่แตะ runtime |
-| เพิ่ม config validation/health explanation ใน docs หรือ pipeline comment | `document/phase2/reqchange.md` หรือ `.woodpecker.yml` | เห็น reasoning และ pipeline intent ชัดขึ้น | ไม่แตะ secret และ resource |
+| Frontend microcopy / release label | `src/phase2-final/frontend/...` | UI เปลี่ยนหลัง pipeline | ปลอดภัยและเห็นผลชัด |
+| Email wording / CTA link | `.woodpecker/main-push.yml` | notification evidence เปลี่ยน | แตะ path ที่ไม่กระทบ data |
+| Documentation clarity | `document/phase2/report.md` หรือ `reqchange.md` | reviewer เห็น reasoning ดีขึ้น | ไม่มี runtime risk |
 
-### วิธีพูดถ้า reviewer ขอ requirement ใหญ่เกินไป
+ถ้าเลือกข้อใดข้อหนึ่ง ให้ย้ำ 3 อย่างเสมอ
 
-> “requirement นี้มี value ครับ แต่ใหญ่เกิน time box ของรอบ review เพราะจะกระทบ architecture หรือ resource มากเกินไป สำหรับรอบนี้เราขอ break down ให้เป็น change ที่เล็กกว่าและ observable ผ่าน pipeline ก่อน เช่น quality gate, health check, หรือ config validation”
-
----
-
-## 9. Failure/Risk Investigation ที่ตอบได้ดีถ้า reviewer เลือกแนวตรวจสอบแทน change request
-
-| Failure/Risk | สิ่งที่เปิดให้ดู | คำอธิบายที่ควรพูด |
-|---|---|---|
-| test fail | Woodpecker logs | pipeline หยุดก่อน build/deploy คือ fail-fast ที่ดี |
-| build fail | build-push stage | image ไม่ถูก push, production ไม่เปลี่ยน |
-| deploy ไม่อัปเดต | `kubectl rollout status`, `kubectl set image` | ชี้จุดว่า fail ที่ rollout หรือ image tag |
-| secret/config missing | `secret.sample.yaml`, `postgres-secret.sample.yaml` | ชี้ว่า secret management แยกจาก git และถ้าขาดจะ fail ที่ readiness/deploy |
-| Docker image issue | Docker Hub tag strategy ใน `.woodpecker.yml` | ใช้ commit SHA เพื่อ trace ได้ว่าเวอร์ชันไหนถูก deploy |
-| config drift | `k8s/kustomization.yaml` เทียบกับ deploy step | อธิบายได้ว่า manifest กับ pipeline ต้อง sync กันเสมอ และนี่เป็น improvement point ที่ดี |
-
-ประโยคที่ควรใช้เวลาถูกถามเรื่อง fail
-
-> “เราพยายามไม่ตอบเพียงว่า ‘ไม่ผ่าน’ หรือ ‘ผ่าน’ แต่จะแยกให้ชัดว่า fail เกิดใน stage ไหน และ stage นั้นป้องกันไม่ให้ปัญหาหลุดไปถึง production อย่างไร”
+1. แตะไฟล์น้อย
+2. rollback ง่าย
+3. ผลลัพธ์พิสูจน์ได้จากจอหรือ log จริง
 
 ---
 
-## 10. Improvement Points ที่ควรพูดต่อท้ายถ้าเหลือเวลา
+## 8. สิ่งที่ไม่ควรพูดหรือทำ
 
-ถ้ามีเวลาเหลือ 30–60 วินาที ให้พูดส่วนนี้เพื่อเพิ่มคุณค่าเชิง DevOpsSec
-
-1. เพิ่ม Trivy image/config scan เป็น security gate ใน active Phase 2 pipeline
-2. เพิ่ม smoke test ที่ลึกกว่า `/healthz` เช่น CRUD path จริง
-3. เพิ่ม rollback note หรือ deploy verification ที่ชัดขึ้น
-4. cleanup ของเดิมที่เป็น legacy เช่น step หรือ resource ที่เหลือจากยุค SQLite เพื่อหลีกเลี่ยง config drift
-5. เพิ่ม monitoring/logging เช่น Prometheus, Loki, Grafana หรืออย่างน้อย deployment event review ที่เป็นระบบ
-
-ประโยคที่ควรพูด
-
-> “ถ้าต่อยอดจาก baseline นี้ในเชิง DevOpsSec สิ่งที่คุ้มที่สุดคือเพิ่ม security gate, runtime observability, และลด config drift ระหว่างเอกสาร, manifest, และ pipeline ให้ตรงกันมากขึ้น”
+1. อย่าเปิด `src/phase2-final/.woodpecker.yml` เพราะไม่ใช่ active file
+2. อย่าใช้คำว่า “pipeline ของเรามีแค่ test/build/deploy/email” เพราะไม่สะท้อนของจริง
+3. อย่าพูดว่า frontend quality gate เป็น planned change เพราะมันอยู่ใน baseline แล้ว
+4. อย่าพูดว่า Trivy/Cosign/SBOM เป็นของที่ repo root มีเฉย ๆ เพราะ main push pipeline ใช้อยู่จริง
+5. อย่าทำให้คนฟังสับสนระหว่าง dev/local path ที่ยังมี SQLite กับ production cluster path ที่ใช้ PostgreSQL
 
 ---
 
-## 11. ประโยคเปิด-กลาง-ปิด ที่จำง่ายที่สุด
+## 9. One-Page Cheat Sheet
 
-### ประโยคเปิด
-
-> “วันนี้เราจะ establish baseline ของระบบและ pipeline ก่อน แล้วค่อยรับ change ที่เล็ก ปลอดภัย และวัดผลได้ผ่าน pipeline จริง”
-
-### ประโยคกลางตอนทำ live change
-
-> “สิ่งที่เราเพิ่มไม่ได้มีเป้าหมายเพื่อให้ YAML ยาวขึ้น แต่เพื่อทำให้ feedback loop ของ pipeline ชัดขึ้นและเชื่อถือได้มากขึ้น”
-
-### ประโยคปิด
-
-> “สิ่งที่ควรจดจากเดโมวันนี้ไม่ใช่แค่ว่าเราแก้ไฟล์ไหน แต่คือ baseline เดิมของระบบ, หลักคิด small-safe-observable, และการใช้ pipeline เป็นตัวพิสูจน์ผลของการเปลี่ยนแปลง”
-
----
-
-## 12. One-Page Cheat Sheet สำหรับท่องก่อนขึ้นจริง
-
-1. ระบบ: TodoApp Big Calendar บน K3s, ingress ผ่าน Traefik, data layer เป็น PostgreSQL, delivery ใช้ Woodpecker
-2. Baseline pipeline: test → build/push → deploy → rollout check → smoke test → email
-3. Safety boundary: ไม่ลบ resource, ไม่แตะ secret จริง, ไม่ทำลาย infra, ไม่ทำงานใหญ่เกิน 10 นาที
-4. Live change หลัก: เพิ่ม `test-frontend` ก่อน `build-push-web`
-5. เหตุผล: frontend มี script และ tests อยู่แล้ว แต่ pipeline baseline ยังไม่บังคับใช้
-6. Observable result: เห็น stage ใหม่ใน Woodpecker และ web build จะไม่เกิดจนกว่า gate จะผ่าน
-7. ถ้า fail: ถือว่า feedback loop ทำงาน เพราะปัญหาถูกจับก่อน deploy
-8. ถ้าสำเร็จ: ถือว่า pipeline น่าเชื่อถือขึ้นและกลุ่มถัดไปอ้าง baseline นี้ต่อได้
+1. แอป: TodoApp Big Calendar เป็นปลายทางของทุก deploy
+2. Runtime: Browser → Nginx/Traefik → Frontend + Weighted Backend → PostgreSQL
+3. Pipeline: `.woodpecker/main-push.yml` คือ source of truth ของ main deployment
+4. Must show: quality gates, sign/scan, canary, smoke test, monitoring, email
+5. Must say: evidence-first, active baseline, delivered improvements
+6. Must avoid: โชว์ของเก่าเป็นของใหม่, path pipeline เก่า, stage count เก่า
+7. Optional live change: frontend text, email wording, docs clarity
+8. Closing line: เราส่งมอบทั้ง app และระบบพิสูจน์ผลของ app
